@@ -1,0 +1,210 @@
+name: "重点绩效评价报告模版2025"
+description: "重点绩效评价的标准模版，包含项目概述、综合评价、成效经验、问题分析、改进建议及附件等部分。"
+version: "1.0"
+chapters:
+  - title: "一、项目概述"
+    chapter_code: "1"
+    default_prompt_text: 
+    writing_sequence_order: 11
+    is_indicator_driven: false
+    fixed_qa_ids_json: '[]'
+    depends_on_chapter_codes: '[]'
+    fixed_table_schema_json: '{}'
+    sub_chapters:
+      - title: "（一）项目立项背景及目的、项目主要内容"
+        chapter_code: "1.1"
+        default_prompt_text: |
+          请围绕以下两个核心方面，并严格按照顺序详细说明项目情况：
+          1. 项目立项背景与目的
+          2. 项目主要实施内容
+        writing_sequence_order: 12
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '[]'
+        fixed_table_schema_json: '{}'
+        # YAML for 1.1.1 and 1.1.2 are managed by the parent prompt for 1.1
+
+      - title: "（二）资金投入和使用情况、项目实施情况"
+        chapter_code: "1.2"
+        default_prompt_text: |
+          请围绕以下两个核心方面，并严格按照顺序详细说明项目情况：
+          1. 资金投入与使用
+          2. 项目实施情况
+        writing_sequence_order: 13
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '["1.1"]'
+        fixed_table_schema_json: '{"序号": "TEXT", "项目": "TEXT", "补贴标准": "TEXT", "实发金额": "REAL", "涉及企业（机构）数": "INTEGER", "涉及人数": "INTEGER", "发放时间": "TEXT", "备注": "TEXT"}'
+        # YAML for 1.2.1 and 1.2.2 are managed by the parent prompt for 1.2
+
+      - title: "（三）项目组织管理"
+        chapter_code: "1.3"
+        default_prompt_text: |
+          请围绕以下三个核心方面，并严格按照顺序详细描述项目的组织管理情况：
+          1. 相关方职责
+          2. 业务管理流程
+          3. 资金管理流程
+        writing_sequence_order: 14
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '["1.1", "1.2"]'
+        fixed_table_schema_json: '{}'
+        # YAML for 1.3.1, 1.3.2, 1.3.3 are managed by the parent prompt for 1.3
+
+      - title: "（四）项目绩效目标"
+        chapter_code: "1.4"
+        default_prompt_text: |
+          请围绕以下两个核心方面，并严格按照顺序详细阐述项目的绩效目标：
+          1. 项目年度总目标：通过知识库搜索绩效目标表复制相关内容。
+          2. 项目绩效指标：务必以表格形式（通过知识库搜索绩效目标表复制相关内容)
+        writing_sequence_order: 15
+        is_indicator_driven: false
+        fixed_qa_ids_json: '["项目的核心年度总目标是什么？是否清晰、可衡量？", "为达成总体目标，项目设定了哪些具体的产出指标、效益指标和满意度指标？各项指标的具体目标值（或衡量标准）是什么？（请提供表格）"]'
+        depends_on_chapter_codes: '[]'
+        fixed_table_schema_json: '{"一级指标": "TEXT", "二级指标": "TEXT", "三级指标": "TEXT", "指标值": "TEXT", "指标值说明": "TEXT"}'
+        # YAML for 1.4.1 and 1.4.2 are managed by the parent prompt for 1.4
+
+  - title: "二、综合绩效评价结论"
+    chapter_code: "2"
+    default_prompt_text: |
+      请基于对项目决策、过程、产出和效益四个维度的全面绩效分析，给出项目的综合评价结论。应包含项目总得分、评价等级，并务必以表格形式（参考导师文档中的"指标得分情况表"）清晰展示各一级指标（决策、过程、产出、效益）的计划分值、实际得分和得分率。在此基础上，简要概述项目实施的总体成效和主要亮点。
+    writing_sequence_order: 16
+    is_indicator_driven: false
+    fixed_qa_ids_json: '["项目的最终综合评价得分是多少，属于哪个等级（优、良、中、差）？", "项目在决策、过程、产出、效益四个维度的表现具体如何（请提供各一级指标的分值、得分、得分率对照表）？", "基于评价结果，项目实施的总体结论性成效是什么？有哪些突出亮点？"]'
+    depends_on_chapter_codes: '["7.2.1", "7.2.2", "7.2.3", "7.2.4"]'
+    fixed_table_schema_json: '{"一级指标": "TEXT", "分值": "REAL", "得分": "REAL", "得分率": "TEXT"}'
+
+  - title: "三、主要成效及经验"
+    chapter_code: "3"
+    default_prompt_text: |
+      请详细总结项目实施过程中所取得的各项主要成效，需结合具体数据和事实进行阐述（例如，导师文档中提及的：全年累计走访企业102家次，发放就业补助资金1526.5万元，惠及301家用人单位8428人；2023年高新区城镇新增就业人数、失业人员再就业人数、就业困难人员就业人数均远超目标等）。同时，提炼出项目在政策执行、资金管理、部门协同、服务优化等方面可供其他地区或类似项目借鉴的成功经验和有效做法。
+    writing_sequence_order: 17
+    is_indicator_driven: false
+    fixed_qa_ids_json: '["项目在促进就业、保障民生方面取得了哪些可量化的具体成效（例如新增就业人数、惠及企业数、资金发放规模等）？", "项目在政策制定与执行、资金管理与拨付、跨部门协作、对受益对象服务等方面有哪些值得推广的成功经验或创新做法？"]'
+    depends_on_chapter_codes: '["1", "2"]'
+    fixed_table_schema_json: '{}'
+
+  - title: "四、存在的问题和原因分析"
+    chapter_code: "4"
+    default_prompt_text: |
+      请根据调研（如问卷调查、访谈）和数据分析，客观、准确地指出项目在实施过程中存在的主要问题。例如，导师文档中提及的：就业补助政策知晓率低、部分群众满意度不高、预算绩效管理工作有待加强等。对于每个识别出的问题，都应深入剖析其产生的内外部原因，如政策宣传方式不足、申请流程复杂度、绩效目标设置的科学性等。
+    writing_sequence_order: 18
+    is_indicator_driven: false
+    fixed_qa_ids_json: '["项目实施中在政策宣传、群众满意度、预算绩效管理等方面暴露了哪些主要问题？", "导致这些问题产生的深层原因是什么（例如，宣传渠道单一、申请门槛高、绩效意识不足等）？", "是否存在其他未被充分认知的问题？"]'
+    depends_on_chapter_codes: '["1", "2", "3", "7.5"]'
+    fixed_table_schema_json: '{}'
+
+  - title: "五、改进建议"
+    chapter_code: "5"
+    default_prompt_text: |
+      针对在"存在的问题和原因分析"部分指出的各项主要问题（例如，政策知晓率低、群众满意度不高、预算绩效管理待加强等），请逐条提出具体的、有针对性的、可操作的改进建议。例如，针对政策知晓率低，可以建议加强社区宣传、利用新媒体推广、优化政策解读方式等；针对申请难度大，可以建议简化流程、提供窗口指导等。建议应明确改进方向、责任主体（如果可能）和预期效果。
+    writing_sequence_order: 19
+    is_indicator_driven: false
+    fixed_qa_ids_json: '["针对发现的每个主要问题（如政策知晓率、申请难度、绩效管理），应分别采取哪些具体的改进措施？", "如何确保这些改进建议具有可操作性并能有效落实？", "改进后预期的效果是什么？"]'
+    depends_on_chapter_codes: '["4"]'
+    fixed_table_schema_json: '{}'
+
+  - title: "六、其他需要说明的问题"
+    chapter_code: "6"
+    default_prompt_text: |
+      如果存在报告正文未能充分涵盖，但对全面理解项目情况、评价结论或未来改进有重要影响的其他事项，请在此处进行补充说明。例如，导师文档中提及的"公益性岗位补贴和基层岗位补贴是就业补助的重要一环，但2023年高新区并未开展此类补助"及其原因和建议，就属于此类需要说明的问题。
+    writing_sequence_order: 20
+    is_indicator_driven: false
+    fixed_qa_ids_json: '["是否存在报告正文未详细阐述但对项目有重要影响的特殊情况或背景信息需要说明？", "例如，某些特定政策（如公益性岗位补贴）在本地的特殊执行情况、未执行原因以及相关的考虑或建议是什么？"]'
+    depends_on_chapter_codes: '[]'
+    fixed_table_schema_json: '{}'
+
+  - title: "七、附件"
+    chapter_code: "7"
+    default_prompt_text:
+    writing_sequence_order: 16
+    is_indicator_driven: false
+    fixed_qa_ids_json: '[]'
+    depends_on_chapter_codes: '[]'
+    fixed_table_schema_json: '{}'
+    sub_chapters:
+      - title: "附件一 绩效评价工作开展情况"
+        chapter_code: "7.1"
+        default_prompt_text: |
+          请围绕以下五个核心方面，并严格按照顺序详细描述本次绩效评价工作的具体开展情况：
+          1. 评价目的、对象和范围：明确评价的核心目的，评价的具体项目名称、涉及资金规模，以及评价的地域范围。
+          2. 评价依据：完整列出评价工作所遵循的主要国家、省、市级法律法规、政府规范性文件、部门规章制度、行业标准及其他相关政策性文件。
+          3. 评价指标体系：详细说明本次评价所采用的指标体系的构建逻辑和原则（如"决策—过程—产出—效益"思路），其主要构成部分（如一级、二级、三级指标的层级结构和具体指标名称），以及各项指标的权重分配和选取理由。
+          4. 评价原则、评价方法和标准：阐述评价工作遵循的基本原则（如客观公正、科学规范、分级分类、绩效相关等），采用的主要评价方法（如成本效益分析法、比较法、因素分析法、最低成本法、公众评判法等，需说明选择原因），以及各项具体指标的评价标准是如何确定的（例如：计划标准、行业标准、历史标准或其他可参照标准）。
+          5. 评价工作过程：分阶段详细描述绩效评价工作的实际开展过程，包括：评价准备阶段（如方案制定、指标确定、资料收集等）及时间安排；现场实施阶段（如深入现场核查资料、进行社会调研、组织访谈座谈、发放回收问卷等）及时间安排；评价报告撰写提交阶段（如数据分析、初步结论形成、与被评价单位交换意见、报告修改与最终定稿等）及时间安排。
+        writing_sequence_order: 2
+        is_indicator_driven: false
+        fixed_qa_ids_json: '["本次绩效评价的核心目的是什么？评价的具体项目、资金、时间及地域范围是怎样的？", "评价工作主要依据了哪些国家、省、市级的法律法规和政策文件？", "评价指标体系是如何构建的？包含哪些主要维度和各级指标？各项指标的权重是如何确定的？", "评价工作遵循了哪些基本原则？采用了哪些主要的评价方法（如因素分析法、公众评判法等）？各项指标的评价标准是如何制定的？", "评价工作的具体流程是怎样的？分为几个阶段？每个阶段的主要工作内容是什么？"]'
+        depends_on_chapter_codes: '[3.1]'
+        fixed_table_schema_json: '{}'
+        # YAML for 7.1.1 to 7.1.5 are managed by the parent prompt for 7.1
+
+      - title: "附件二 绩效评价指标分析"
+        chapter_code: "7.2"
+        default_prompt_text: 
+        writing_sequence_order: 1
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '[]'
+        fixed_table_schema_json: '{}'
+        sub_chapters: 
+          - title: "（一）项目决策指标分析"
+            chapter_code: "7.2.1"
+            default_prompt_text: 
+            writing_sequence_order: 4
+            is_indicator_driven: true
+            fixed_qa_ids_json: '[]'
+            depends_on_chapter_codes: '[]'
+            fixed_table_schema_json: '{"columns": ["二级指标", "三级指标", "权重", "目标值", "完成值", "得分", "指标分析说明"]}'
+          - title: "（二）项目过程指标分析"
+            chapter_code: "7.2.2"
+            default_prompt_text: 
+            writing_sequence_order: 5
+            is_indicator_driven: true
+            fixed_qa_ids_json: '[]'
+            depends_on_chapter_codes: '[]'
+            fixed_table_schema_json: '{"columns": ["二级指标", "三级指标", "权重", "目标值", "完成值", "得分", "指标分析说明"]}'
+          - title: "（三）项目产出指标分析"
+            chapter_code: "7.2.3"
+            default_prompt_text: 
+            writing_sequence_order: 6
+            is_indicator_driven: true
+            fixed_qa_ids_json: '[]'
+            depends_on_chapter_codes: '[]'
+            fixed_table_schema_json: '{"columns": ["二级指标", "三级指标", "权重", "目标值", "完成值", "得分", "指标分析说明"]}'
+          - title: "（四）项目效益指标分析"
+            chapter_code: "7.2.4"
+            default_prompt_text: 
+            writing_sequence_order: 7
+            is_indicator_driven: true
+            fixed_qa_ids_json: '[]'
+            depends_on_chapter_codes: '[]'
+            fixed_table_schema_json: '{"columns": ["二级指标", "三级指标", "权重", "目标值", "完成值", "得分", "指标分析说明"]}'
+
+      - title: "附件三 项目绩效评价指标体系评分表"
+        chapter_code: "7.3"
+        default_prompt_text: 
+        writing_sequence_order: 8
+        is_indicator_driven: true
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '["7.2"]'
+        fixed_table_schema_json: '{"一级指标": "TEXT", "二级指标": "TEXT", "三级指标": "TEXT", "分值": "REAL", "评分规则": "TEXT", "评分过程": "TEXT", "得分": "REAL"}'
+
+      - title: "附件四 绩效评价问题清单"
+        chapter_code: "7.4"
+        default_prompt_text: |
+          请以表格形式（参考导师文档中的"2023年就业补助项目问题清单"）汇总并清晰列出在本次绩效评价过程中所发现的各项主要问题。每个问题应明确其所属的问题分类（如：绩效目标管理、预算管理、效益问题、满意度不高等），并有具体、详实的问题描述。确保问题清单与报告正文第四部分"存在的问题和原因分析"以及附件二"绩效评价指标分析"中反映的问题点相一致。
+        writing_sequence_order: 9
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '["7.2.1", "7.2.2", "7.2.3", "7.2.4"]'
+        fixed_table_schema_json: '{"问题分类": "TEXT", "具体问题": "TEXT", "问题描述": "TEXT"}'
+
+      - title: "附件五 满意度调查分析报告"
+        chapter_code: "7.5"
+        default_prompt_text: 
+        writing_sequence_order: 10
+        is_indicator_driven: false
+        fixed_qa_ids_json: '[]'
+        depends_on_chapter_codes: '[]'
+        fixed_table_schema_json: '{}' 

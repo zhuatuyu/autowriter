@@ -22,9 +22,9 @@ from metagpt.config2 import config
 from metagpt.logs import logger
 from metagpt.environment import Environment
 
-from backend.models.session import WorkflowPhase
-from backend.tools.alibaba_search import alibaba_search_tool
-from backend.tools.report_template_analyzer import report_template_analyzer, ChapterInfo
+from models.session import WorkflowPhase
+from tools.alibaba_search import alibaba_search_tool
+from tools.report_template_analyzer import report_template_analyzer, ChapterInfo
 
 class TemplateAnalysisAction(Action):
     """模板分析动作 - 分析报告模板并制定写作计划"""

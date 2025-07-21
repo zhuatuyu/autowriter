@@ -15,10 +15,15 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
+        secure: false,
       },
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
+        changeOrigin: true,
+        secure: false,
+        timeout: 60000,
+        proxyTimeout: 60000,
       },
     },
   },

@@ -1,4 +1,179 @@
-<<<<<<< HEAD
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Pyton
+build/
+develogs/
+dist/
+downl/
+eggs/
+.eggs/
+lib/
+lib6
+parts/
+sdist/
+var/
+wheels/
+share/p
+*.egg-info/
+.installed.fg
+*.egg
+MANIF
+
+nment
+venv/
+env/
+ENV/
+env.
+venv.bak/
+
+yCharm
+.idea/
+
+S Code
+.vscode/
+!.vscodes.json
+!.vscode/tasks.json
+!.vscode/launch.jso
+!.vscode/extensions.json
+
+
+.cursor/
+
+Frontend
+node_modules/
+jspm_packages/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+g*
+
+# Frontend build
+frontend/dist/
+ld/
+.next
+out
+.nuxt
+.vuepress/dist
+.svelte-kit/
+**/.vitepress/dist
+
+
+# Env
+.env
+.*
+!.env.example
+.env
+.env.dev
+.env.testl
+.env.prodal
+
+# Logs
+logs/
+logs
+*.log
+
+# Datab
+*.db
+*.sqlite
+*.sqlite3
+
+
+# Cache des
+.cache/
+.parcel-cache
+e/
+.coverage
+.nyc_output
+*.tsbuildinfo
+
+# MacOS
+.DS_Store
+ouble
+.LSOverride
+
+s
+Thumbs.db
+ehthu
+Desktop.ini
+
+# Genamples)
+wo/
+md
+
+# MetaGPT specifi
+MetaGPT/
+
+# Example datasetspos)
+example/easy-datas
+
+# Temporles
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# IDE files
+*.sublject
+*.suce
+
+# Jupyter Notek
+.ipynb_checkpoints
+
+# pytest
+_cache/
+
+# mypy
+
+.dmypy.json
+dmypon
+
+# Node
+pids
+pid
+*.seed
+*.pid.lk
+
+coverage
+*.lcov
+.grunt
+ts
+.lock-wscript
+build/Release
+es/
+.npm
+.eslin
+e
+.node_repl_history
+*.tgz
+
+.serverless/
+.fusebox/
+b/
+.firebase/
+.tern-port
+est
+.docusaurus
+
+# Yarn v3
+
+.yarn/*
+!.yarn/patch
+ins
+!.yarn/releases
+!.yarn/sdks
+ons
+
+# Vis
+-*
+vite.config.ts.timestam
+
+s
+report.[0-9]*.[0-9]*.[0-9][0-9]*.json*.ortreptic gnos# Diap-*timestampnfig.js.vite.cofilelogs te .yarn/versi!!.yarn/pluges.pnp.*.vscode-tdynamod.integrity.yarn-cach.stylelintcachet_modulwebponen_combowervlib-cooc*.s specific.jy.js_cache/.mypytest.pyboome-workspabliime-prory fia/ete re be separatayy ms the (exclude ao)repseparate 's a ry as itire directo ent (excludecE.DMces/REA!workspapaces/*ksrkeep some ex to u might wantnal - yooptios (ed workspaceeratmbs.db Window#AppleD.ytest_cach.poriirectocal-db/lase.locuctionloca.t.localopmenel.local.envblest variaironmenheess/cacvitepr**/.buintend/fro-debug.lo.pnpmNode.js / # sor# Curn/setting# V# Pbak/ Enviroirtual# VESTcls/ython-whee4/dsoap-egh<<<<<<< HEAD
 # Python
 __pycache__/
 *.py[cod]

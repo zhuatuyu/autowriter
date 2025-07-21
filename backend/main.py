@@ -2,7 +2,7 @@
 AutoWriter Enhanced - 主服务入口
 基于 FastAPI + WebSocket 的多Agent协作系统
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import json
@@ -10,11 +10,12 @@ import asyncio
 from typing import Dict, List
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from backend.models.session import WorkSession, AgentMessage
-# 使用智能管理器
-from backend.services.intelligent_manager import intelligent_manager
-print("🧠 Using Intelligent Manager with SOP")
+# 使用新的核心管理器
+from backend.services.core_manager import core_manager
+print("🚀 Using Core Manager")
 
 from backend.services.websocket_manager import WebSocketManager
 
@@ -69,8 +70,72 @@ async def create_session(project_info: dict):
 @app.get("/api/sessions")
 async def list_sessions():
     """获取会话列表"""
-    # TODO: 从数据库获取会话列表
-    return {"sessions": []}
+    try:
+        sessions = core_manager.get_all_sessions()
+        return {"sessions": sessions}
+    except Exception as e:
+        return {"sessions": [], "error": str(e)}
+
+@app.get("/api/projects")
+async def list_projects():
+    """获取workspaces目录下的项目列表"""
+    try:
+        import os
+        from pathlib import Path
+        
+        workspace_dir = Path("workspaces")
+        projects = []
+        
+        if workspace_dir.exists():
+            for project_path in workspace_dir.iterdir():
+                if project_path.is_dir():
+                    # 获取项目基本信息
+                    project_info = {
+                        'id': project_path.name,
+                        'name': project_path.name.replace('_', ' ').replace('-', ' ').title(),
+                        'type': '绩效评价',
+                        'status': 'draft',
+                        'lastModified': datetime.fromtimestamp(project_path.stat().st_mtime).strftime('%Y/%m/%d'),
+                        'progress': 0
+                    }
+                    
+                    # 检查是否有报告文件来判断进度
+                    report_file = project_path / 'report.md'
+                    if report_file.exists():
+                        project_info['status'] = 'completed'
+                        project_info['progress'] = 100
+                    
+                    # 检查是否有进度文件
+                    progress_file = project_path / 'writing_progress.json'
+                    if progress_file.exists():
+                        try:
+                            import json
+                            with open(progress_file, 'r', encoding='utf-8') as f:
+                                progress_data = json.load(f)
+                                project_info['progress'] = progress_data.get('overall_progress', 0)
+                                if project_info['progress'] > 0 and project_info['progress'] < 100:
+                                    project_info['status'] = 'active'
+                        except:
+                            pass
+                    
+                    projects.append(project_info)
+        
+        return {"projects": projects}
+    except Exception as e:
+        return {"projects": [], "error": str(e)}
+
+@app.get("/api/agents/{session_id}")
+async def get_agents_status(session_id: str):
+    """获取指定会话的所有Agent状态"""
+    try:
+        session_status = await core_manager.get_session_status(session_id)
+        if 'error' in session_status:
+            return {"agents": [], "error": session_status['error']}
+        
+        agents = session_status.get('agents', [])
+        return {"agents": agents}
+    except Exception as e:
+        return {"agents": [], "error": str(e)}
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
@@ -113,6 +178,17 @@ async def handle_user_intervention(session_id: str, message: dict):
     
     print(f"Received user message for session {session_id}: {user_message[:100]}...")
     
+    # 检查是否有活跃的WebSocket连接
+    if websocket_manager.get_connection_count(session_id) == 0:
+        print(f"⏳ No active connection for session {session_id}, waiting for reconnection...")
+        # 等待一小段时间让前端重新连接
+        await asyncio.sleep(1)
+        
+        # 再次检查连接
+        if websocket_manager.get_connection_count(session_id) == 0:
+            print(f"❌ Still no connection for session {session_id}, skipping message processing")
+            return
+    
     # 广播用户消息给所有连接的客户端
     await websocket_manager.send_message(session_id, {
         "type": "user_intervention",
@@ -121,31 +197,60 @@ async def handle_user_intervention(session_id: str, message: dict):
     })
     
     # 检查是否需要启动分析
-    session_status = intelligent_manager.get_session_status(session_id)
-    if not session_status or not session_status.get("workflow_started"):
-        print(f"🚀 Detected new session, starting Intelligent Director workflow for user message in session {session_id}")
-        # 启动新的智能项目总监工作流程 - 这应该是默认的模式
-        await intelligent_manager.start_intelligent_workflow(session_id, websocket_manager)
+    session_status = await core_manager.get_session_status(session_id)
+    if 'error' in session_status:
+        print(f"🚀 Detected new session, starting workflow for user message in session {session_id}")
+        # 启动新的工作会话
+        await core_manager.start_session(session_id)
+        await core_manager.handle_user_message(session_id, user_message, websocket_manager)
     else:
         # 如果已经有活跃会话，作为用户输入处理
-        await intelligent_manager.handle_user_intervention(session_id, user_message)
+        await core_manager.handle_user_intervention(session_id, user_message, websocket_manager)
 
 async def start_agent_analysis(session_id: str, message: dict):
     """启动Agent分析流程"""
     project_info = message.get("project_info", {})
     
     # 检查是否已经在运行分析
-    session_status = intelligent_manager.get_session_status(session_id)
-    if session_status and session_status.get("workflow_started"):
+    session_status = await core_manager.get_session_status(session_id)
+    if 'error' not in session_status and session_status.get("status") == "active":
         print(f"Analysis already started for session {session_id}, ignoring duplicate request")
         return
     
-    # 启动SOP工作流程
-    await intelligent_manager.start_sop_workflow(session_id, project_info, websocket_manager)
+    # 启动工作流程
+    await core_manager.start_session(session_id, project_info)
+    await core_manager.handle_user_message(session_id, "开始分析", websocket_manager)
+
+@app.post("/api/upload/{session_id}")
+async def upload_file(session_id: str, file: UploadFile = File(...)):
+    """处理文件上传，并直接将其存入文档专家的工作区"""
+    try:
+        # 直接定位到文档专家的工作目录
+        # 注意: 'document_expert' 是我们在 prompts.py 中定义的 agent_id
+        workspace_path = Path("workspaces") / session_id / "document_expert"
+        upload_path = workspace_path / "uploads"
+        upload_path.mkdir(parents=True, exist_ok=True)
+
+        # 保存文件
+        file_location = upload_path / file.filename
+        with open(file_location, "wb+") as file_object:
+            file_object.write(file.file.read())
+        
+        print(f"📄 文件已上传至文档专家工作区: {file_location}")
+
+        # 通知项目总监有新文件
+        user_message = f"用户上传了新文件 '{file.filename}'，已存入文档专家工作区，请您指示处理。"
+        await core_manager.handle_user_message(session_id, user_message, websocket_manager)
+
+        return {"status": "success", "filename": file.filename, "location": str(file_location)}
+    except Exception as e:
+        print(f"❌ 文件上传失败: {e}")
+        return {"status": "error", "message": str(e)}
+
 
 async def pause_workflow(session_id: str):
     """暂停工作流"""
-    await intelligent_manager.pause_workflow(session_id)
+    # TODO: 实现暂停功能
     await websocket_manager.send_message(session_id, {
         "type": "workflow_status",
         "status": "paused",
@@ -154,7 +259,7 @@ async def pause_workflow(session_id: str):
 
 async def resume_workflow(session_id: str):
     """恢复工作流"""
-    await intelligent_manager.resume_workflow(session_id)
+    # TODO: 实现恢复功能
     await websocket_manager.send_message(session_id, {
         "type": "workflow_status",
         "status": "resumed",
@@ -230,7 +335,7 @@ async def simple_test(session_id: str):
 async def get_workflow_status(session_id: str):
     """获取工作流程状态"""
     try:
-        summary = intelligent_manager.get_workflow_summary(session_id)
+        summary = await core_manager.get_session_status(session_id)
         return {"status": "success", "data": summary}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -240,7 +345,7 @@ async def post_user_intervention(session_id: str, request: dict):
     """POST方式处理用户介入"""
     try:
         message = request.get("message", "")
-        await intelligent_manager.handle_user_intervention(session_id, message)
+        await core_manager.handle_user_intervention(session_id, message, websocket_manager)
         return {"status": "success", "message": "用户介入已处理"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -256,7 +361,8 @@ async def start_intelligent_workflow(request: dict):
         print(f"🧠 启动智能项目总监工作流程: {session_id}")
         
         # 启动智能项目总监工作流程
-        await intelligent_manager.start_intelligent_workflow(session_id, websocket_manager)
+        await core_manager.start_session(session_id)
+        await core_manager.handle_user_message(session_id, "启动智能项目总监工作流程", websocket_manager)
         
         return {
             "status": "success", 
@@ -279,7 +385,8 @@ async def start_iterative_workflow(request: dict):
         print(f"🎯 启动迭代式工作流程: {session_id}")
         
         # 启动迭代式工作流程
-        await intelligent_manager.start_iterative_workflow(session_id, websocket_manager)
+        await core_manager.start_session(session_id)
+        await core_manager.handle_user_message(session_id, "启动迭代式工作流程", websocket_manager)
         
         return {
             "status": "success", 

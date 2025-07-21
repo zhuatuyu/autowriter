@@ -1,7 +1,6 @@
 import React from 'react';
-import Sidebar from './Sidebar';
 import ChatArea from './ChatArea';
-import ReportPreview from './ReportPreview';
+import AgentTeamPanel from './AgentTeamPanel';
 
 interface LayoutProps {
   children?: React.ReactNode;
@@ -9,20 +8,15 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="flex h-screen bg-gray-100">
-      {/* 左侧栏 - 报告列表 */}
-      <div className="w-80 bg-white border-r border-gray-200 flex-shrink-0">
-        <Sidebar />
-      </div>
-      
-      {/* 中间区域 - Agent对话 */}
-      <div className="flex-1 flex flex-col min-w-0">
+    <div className="flex h-screen bg-gray-900 text-white">
+      {/* 主对话区域 - 占30% */}
+      <div className="w-[35%] flex flex-col min-w-0 bg-gray-800">
         <ChatArea />
       </div>
       
-      {/* 右侧栏 - 报告预览 */}
-      <div className="w-96 bg-white border-l border-gray-200 flex-shrink-0">
-        <ReportPreview />
+      {/* 右侧Agent团队工作面板 - 占70% */}
+      <div className="w-[65%] bg-gray-900 border-l border-gray-700 flex-shrink-0 shadow-lg">
+        <AgentTeamPanel />
       </div>
     </div>
   );

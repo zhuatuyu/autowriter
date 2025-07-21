@@ -353,9 +353,7 @@ autowriter/
 │   ├── services/
 │   │   ├── intelligent_manager.py      # 🔥 智能管理器 (统一入口)
 │   │   ├── intelligent_director.py     # 🔥 智能项目总监 (核心)
-│   │   ├── metagpt_manager.py          # MetaGPT传统管理器
-│   │   ├── metagpt_sop_manager.py      # SOP工作流管理器
-│   │   ├── iterative_sop_manager.py    # 迭代式SOP管理器
+│   │   ├── core_manager.py             # 核心工作流管理器
 │   │   └── websocket_manager.py        # WebSocket管理
 │   └── tools/
 │       ├── alibaba_search.py           # 阿里巴巴搜索工具

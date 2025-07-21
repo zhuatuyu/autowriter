@@ -20,8 +20,8 @@ from metagpt.team import Team
 from metagpt.environment import Environment
 from metagpt.logs import logger
 
-from backend.tools.alibaba_search import alibaba_search_tool
-from backend.tools.report_template_analyzer import report_template_analyzer, ChapterInfo
+from tools.alibaba_search import alibaba_search_tool
+from tools.report_template_analyzer import report_template_analyzer, ChapterInfo
 
 class WorkflowPhase(Enum):
     """工作流程阶段"""

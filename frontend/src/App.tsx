@@ -1,36 +1,19 @@
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout/Layout';
-import HomePage from './pages/HomePage';
-import SessionPage from './pages/SessionPage';
-import './index.css';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5, // 5 minutes
-      retry: 1,
-    },
-  },
-});
+import HomePage from './pages/HomePage'; // 确保路径正确
+import './index.css'; // 重新引入全局样式
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
       <Router>
-        <div className="h-screen bg-gray-50">
           <Routes>
             <Route path="/" element={<HomePage />} />
-            <Route path="/session/:sessionId" element={
-              <Layout>
-                <SessionPage />
-              </Layout>
-            } />
+        <Route path="/session/:sessionId" element={<Layout />} />
+        {/* 如果需要，可以添加一个重定向，当sessionId不存在时回到主页 */}
+        <Route path="/session" element={<Navigate to="/" />} /> 
           </Routes>
-        </div>
       </Router>
-    </QueryClientProvider>
   );
 }
 

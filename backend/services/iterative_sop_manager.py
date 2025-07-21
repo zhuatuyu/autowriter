@@ -19,7 +19,7 @@ from metagpt.actions import Action
 from metagpt.schema import Message
 from metagpt.logs import logger
 
-from backend.tools.alibaba_search import alibaba_search_tool
+from tools.alibaba_search import alibaba_search_tool
 
 class ReportPhase(Enum):
     """报告阶段"""

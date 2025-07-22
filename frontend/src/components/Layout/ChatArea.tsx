@@ -16,13 +16,23 @@ const ChatArea: React.FC = () => {
 
     const handleSend = () => {
         if (input.trim()) {
-      sendMessage({
-        type: 'user_message',
+            // 先在本地显示用户消息
+            const userMessage = {
+                type: 'user_message',
+                sender: 'user',
                 content: input,
-      });
+                timestamp: new Date().toISOString()
+            };
+            
+            // 发送到后端
+            sendMessage({
+                type: 'user_message',
+                content: input,
+            });
+            
             setInput('');
-    }
-  };
+        }
+    };
 
     const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {

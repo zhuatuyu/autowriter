@@ -1,26 +1,81 @@
-# AutoWriter Enhanced
+# AutoWriter Enhanced - 虚拟AI办公室
 
-AutoWriter Enhanced is an AI-powered multi-agent collaborative system for automated report generation, specifically designed for performance evaluation reports in Chinese government and enterprise contexts.
+AutoWriter Enhanced 是一个基于虚拟办公环境理念的AI协作报告生成系统，通过模拟真实办公室的岗位分工来实现智能化的报告写作。
 
-## Core Features
+## 核心理念：虚拟办公环境
 
-- **Multi-Agent Architecture**: Intelligent collaboration between specialized agents (Chief Editor, Data Analyst, Policy Researcher, etc.)
-- **SOP-Based Workflows**: Structured Standard Operating Procedures for consistent report generation
-- **Real-time Collaboration**: WebSocket-based real-time communication between agents and users
-- **Template-Driven**: YAML-based report templates with configurable chapters and indicators
-- **Human-in-the-Loop**: User intervention capabilities during the automated workflow
-- **MetaGPT Integration**: Built on MetaGPT framework for advanced agent orchestration
+系统设计完全基于真实办公室的工作模式，每个AI Agent对应一个具体的办公室岗位：
 
-## Target Use Cases
+### 🏢 虚拟办公室团队
+- **🎯 智能项目总监**：项目经理，负责客户沟通和团队协调
+- **📄 文档专家（李心悦）**：办公室文秘，负责文档管理和格式化
+- **🔍 案例专家（王磊）**：研究员，负责案例搜索和分析
+- **📊 数据分析师（赵丽娅）**：数据专家，负责统计分析和可视化
+- **✍️ 写作专家（张翰）**：内容创作者，负责报告撰写
+- **👔 总编辑（钱敏）**：质量把关，负责最终审核和润色
 
-- Government performance evaluation reports
-- Enterprise assessment documentation
-- Policy analysis and research reports
-- Data-driven analytical reports with structured templates
+## 核心特性
 
-## Key Differentiators
+### 🤖 智能协作
+- **真实办公室工作流**：模拟真实办公环境的协作模式
+- **明确职责分工**：每个Agent都有清晰的职责边界
+- **实时状态同步**：WebSocket实现实时工作状态更新
+- **人机协同**：用户可随时介入指导工作方向
 
-- Chinese language optimization for government/enterprise reporting
-- Flexible workflow modes (SOP, Iterative, Intelligent Director)
-- Real-time user intervention and guidance
-- Template-based structured output with indicators and tables
+### 📄 专业文档处理
+- **多格式支持**：PDF、Word、Excel等格式自动转换为Markdown
+- **MinerU API集成**：专业的文档处理能力
+- **智能摘要**：自动提取关键信息和生成摘要
+- **文档索引**：建立完整的文档管理体系
+
+### 🔍 智能内容生成
+- **案例搜索**：自动搜索相关案例和最佳实践
+- **数据分析**：从文档中提取和分析数据
+- **内容整合**：将多源信息整合为连贯的报告
+- **质量把控**：多层次的内容审核和润色
+
+## 目标用户
+
+- **政府机构**：绩效评价报告、政策分析报告
+- **企业组织**：评估文档、分析报告
+- **研究机构**：调研报告、数据分析报告
+- **咨询公司**：客户报告、项目评估
+
+## 核心优势
+
+### 🎯 架构优势
+- **模块化设计**：核心基础设施稳定，Agent层可独立开发
+- **易于理解**：虚拟办公室概念直观易懂
+- **高度扩展**：可轻松添加新的"员工"（Agent）
+- **职责清晰**：避免功能重叠和混乱
+
+### 💼 业务优势
+- **专业分工**：每个环节都有专业的AI处理
+- **质量保证**：多层次审核确保输出质量
+- **效率提升**：并行工作大幅提高生产效率
+- **成本降低**：减少人工报告写作的时间成本
+
+### 🛠️ 技术优势
+- **实时协作**：WebSocket实现真正的实时交互
+- **稳定架构**：核心基础设施与业务逻辑分离
+- **AI集成**：深度集成MetaGPT和各种AI服务
+- **文档处理**：专业的多格式文档处理能力
+
+## 使用场景
+
+### 典型工作流程
+1. **需求沟通**：项目总监与客户对话，明确报告需求
+2. **资料处理**：文档专家处理客户上传的各种资料
+3. **信息收集**：案例专家搜索相关案例和参考资料
+4. **数据分析**：数据分析师提取和分析关键数据
+5. **内容创作**：写作专家整合信息撰写报告
+6. **质量审核**：总编辑进行最终审核和润色
+7. **交付反馈**：项目总监与客户确认并处理反馈
+
+### 特色功能
+- **文档智能处理**：上传任何格式文档，自动转换和摘要
+- **实时工作观察**：可视化观察每个AI员工的工作状态
+- **灵活需求调整**：随时调整需求，AI团队自动适应
+- **质量层层把关**：从数据到内容到格式的全方位质量控制
+
+AutoWriter Enhanced 不仅仅是一个报告生成工具，更是一个完整的虚拟AI办公室，为用户提供专业、高效、可靠的报告写作服务。

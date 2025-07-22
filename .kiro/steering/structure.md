@@ -7,32 +7,36 @@ autowriter/
 ├── backend/                 # FastAPI backend application
 ├── frontend/               # React TypeScript frontend
 ├── MetaGPT/               # MetaGPT framework (git submodule)
-├── local-db/              # Local database and documents
-├── workspaces/            # Generated project workspaces
-├── logs/                  # Application logs
+├── workspaces/            # Generated project workspaces (Agent工作区)
 ├── venv/                  # Python virtual environment
 ├── requirements.txt       # Python dependencies
-├── reportmodel.yaml       # Report template configuration
+├── reportmodel.yaml       # Report template configuration (legacy)
 └── test_*.py             # Architecture and workflow tests
 ```
 
-## Backend Structure (`backend/`)
+## Backend Structure (`backend/`) - 虚拟办公环境架构
 
 ```
 backend/
-├── main.py               # FastAPI application entry point
-├── models/               # Data models and schemas
-│   └── session.py       # Session, Agent, and workflow models
-├── services/            # Business logic and agent services
-│   ├── intelligent_manager.py      # Main workflow orchestrator
-│   ├── metagpt_manager.py          # MetaGPT integration layer
-│   ├── metagpt_sop_manager.py      # SOP workflow implementation
-│   ├── iterative_sop_manager.py    # Iterative workflow mode
-│   ├── intelligent_director.py     # Intelligent director agent
-│   └── websocket_manager.py        # WebSocket connection management
-└── tools/               # External tools and integrations
-    ├── alibaba_search.py           # Search functionality
-    └── report_template_analyzer.py # Template parsing and analysis
+├── main.py                    # FastAPI application entry point
+├── models/                    # Data models and schemas
+│   └── session.py            # Session, Agent, and workflow models
+├── services/                  # 核心基础设施层 (稳定层)
+│   ├── core_manager.py        # 核心管理器 - Agent团队协调
+│   ├── llm_provider.py        # LLM提供者 - 统一AI接口
+│   ├── websocket_manager.py   # WebSocket管理器 - 实时通信
+│   └── llm/                   # Agent层 (扩展层)
+│       └── agents/            # 虚拟办公室员工
+│           ├── base.py        # 基础Agent类
+│           ├── director.py    # 🎯 智能项目总监
+│           ├── document_expert.py  # 📄 文档专家 (李心悦)
+│           ├── case_expert.py      # 🔍 案例专家 (王磊)
+│           ├── data_analyst.py     # 📊 数据分析师 (赵丽娅)
+│           ├── writer_expert.py    # ✍️ 写作专家 (张翰)
+│           └── chief_editor.py     # 👔 总编辑 (钱敏)
+└── tools/                     # 工具层 (功能层)
+    ├── alibaba_search.py      # 阿里巴巴搜索工具
+    └── mineru_api_tool.py     # MinerU文档处理API
 ```
 
 ## Frontend Structure (`frontend/src/`)
@@ -60,18 +64,27 @@ frontend/src/
 - **`frontend/vite.config.ts`**: Frontend build configuration with proxy settings
 - **`frontend/tailwind.config.js`**: Tailwind CSS configuration
 
-## Workspace Organization (`workspaces/`)
+## Workspace Organization (`workspaces/`) - 虚拟办公室工作区
 
-Each project gets its own workspace directory:
+每个项目都有自己的虚拟办公室，每个Agent都有独立的工作区：
 ```
-workspaces/
-├── project_001/
-│   ├── dynamic_template.yaml    # Project-specific template
-│   ├── draft/                   # Generated drafts
-│   └── files/                   # Project documents
-└── demo-1/
-    ├── report.md               # Final report output
-    └── writing_progress.json   # Progress tracking
+workspaces/{session_id}/
+├── document_expert/           # 📄 李心悦的工作区 (文档专家)
+│   ├── uploads/              # 客户上传的原始文件
+│   ├── processed/            # MinerU处理后的Markdown文件
+│   ├── summaries/            # 文档摘要
+│   └── index.json           # 文档索引
+├── case_expert/              # 🔍 王磊的工作区 (案例专家)
+│   ├── searches/            # 搜索结果
+│   └── cases/               # 整理的案例
+├── data_analyst/             # 📊 赵丽娅的工作区 (数据分析师)
+│   ├── data/                # 提取的数据
+│   └── charts/              # 生成的图表
+├── writer_expert/            # ✍️ 张翰的工作区 (写作专家)
+│   └── drafts/              # 写作草稿
+├── chief_editor/             # 👔 钱敏的工作区 (总编辑)
+│   └── reviews/             # 审核记录
+└── final_report.md           # 最终报告
 ```
 
 ## Naming Conventions

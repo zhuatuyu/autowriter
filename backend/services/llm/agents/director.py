@@ -1,26 +1,89 @@
+"""
+智能项目总监Agent
+负责项目协调、需求分析和任务分配
+"""
+import asyncio
+import yaml
 from datetime import datetime
 from pathlib import Path
-import yaml
-import asyncio
+from typing import Dict, Any, List
+
+from metagpt.actions import Action
+from metagpt.schema import Message
+from metagpt.logs import logger
 
 from .base import BaseAgent
 from backend.services.llm_provider import llm
+
+class ProjectPlanningAction(Action):
+    """项目规划动作"""
+    
+    async def run(self, user_requirements: str) -> str:
+        """生成项目规划"""
+        prompt = f"""
+基于用户需求生成详细的项目规划YAML模板：
+
+用户需求：
+{user_requirements}
+
+请生成包含以下结构的YAML：
+- report_title: 报告标题
+- report_type: 报告类型
+- chapters: 章节列表，每个章节包含title, description, experts, status
+
+只返回YAML内容，不要包含其他说明。
+"""
+        try:
+            response = await llm.acreate_text(prompt)
+            return response.strip().replace("```yaml", "").replace("```", "").strip()
+        except Exception as e:
+            logger.error(f"项目规划生成失败: {e}")
+            return ""
+
+
+class TaskCoordinationAction(Action):
+    """任务协调动作"""
+    
+    async def run(self, task_info: Dict[str, Any]) -> Dict[str, Any]:
+        """协调任务分配"""
+        return {
+            'status': 'coordinated',
+            'assigned_agents': task_info.get('experts', []),
+            'priority': task_info.get('priority', 'normal')
+        }
+
 
 class IntelligentDirectorAgent(BaseAgent):
     """智能项目总监Agent - 负责动态规划、协调和决策"""
     
     def __init__(self, session_id: str, workspace_path: str):
-        agent_id = 'intelligent-director'
-        # 总监的工作区就是项目的根工作区
-        super().__init__(agent_id, session_id, workspace_path)
-        self.name = '智能项目总监'
-        self.role = '项目总监'
-        self.avatar = '🎯'
+        agent_id = 'director'
+        super().__init__(
+            agent_id=agent_id,
+            session_id=session_id,
+            workspace_path=workspace_path,
+            goal="协调AI团队完成高质量报告写作，确保项目顺利进行",
+            constraints="基于用户需求制定合理计划，确保任务分配得当"
+        )
         
+        # 设置profile（避免重复传递）
+        self.profile = "智能项目总监"
+        
+        # 设置总监信息
+        self.name = '智能项目总监'
+        self.avatar = '🎯'
+        self.expertise = "项目管理与协调"
+        
+        # 设置动作
+        self.set_actions([ProjectPlanningAction, TaskCoordinationAction])
+        
+        # 项目文件路径
         self.template_path = self.agent_workspace / "dynamic_template.yaml"
         self.draft_path = self.agent_workspace / "drafts"
         self.draft_path.mkdir(exist_ok=True)
         self.report_data = None
+        
+        logger.info(f"🎯 智能项目总监初始化完成")
 
     def _get_system_prompt(self) -> str:
         """动态构建系统提示词"""
@@ -131,4 +194,94 @@ class IntelligentDirectorAgent(BaseAgent):
             display_text += f"  - **第{i+1}章: {ch['title']}** (需: {experts})\n"
         return display_text
     
-    # ... (后续的 _execute_writing_plan 等方法将在用户确认后被调用) 
+    async def get_work_summary(self) -> str:
+        """获取工作摘要"""
+        try:
+            summary = f"🎯 {self.name} 工作摘要:\n"
+            
+            if self.report_data:
+                title = self.report_data.get('report_title', '未知项目')
+                chapters = len(self.report_data.get('chapters', []))
+                summary += f"• 当前项目: {title}\n"
+                summary += f"• 规划章节: {chapters} 个\n"
+            else:
+                summary += f"• 当前项目: 暂无活跃项目\n"
+            
+            summary += f"• 当前状态: {self.status}\n"
+            
+            if self.current_task:
+                summary += f"• 当前任务: {self.current_task}\n"
+            
+            return summary
+            
+        except Exception as e:
+            return f"🎯 {self.name}: 工作摘要获取失败 - {str(e)}"
+
+    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
+        """执行具体的项目管理任务"""
+        try:
+            task_type = task.get('type', 'handle_request')
+            
+            if task_type == 'handle_request':
+                return await self._handle_user_request(task)
+            elif task_type == 'generate_plan':
+                return await self._generate_project_plan(task)
+            elif task_type == 'coordinate_team':
+                return await self._coordinate_team_tasks(task)
+            else:
+                return await self._handle_user_request(task)
+                
+        except Exception as e:
+            logger.error(f"❌ {self.name} 执行任务失败: {e}")
+            return {
+                'agent_id': self.agent_id,
+                'status': 'error',
+                'result': f'任务执行失败: {str(e)}',
+                'error': str(e)
+            }
+
+    async def _handle_user_request(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """处理用户请求"""
+        try:
+            user_message = task.get('message', '')
+            self.current_task = f"处理用户需求: {user_message[:50]}..."
+            
+            # 生成项目规划
+            planning_action = ProjectPlanningAction()
+            yaml_content = await planning_action.run(user_message)
+            
+            if yaml_content:
+                self.report_data = yaml.safe_load(yaml_content)
+                self._save_template()
+                
+                result = {
+                    'agent_id': self.agent_id,
+                    'status': 'completed',
+                    'result': f"已为您生成项目规划：{self.report_data.get('report_title', '报告')}",
+                    'project_plan': self.report_data,
+                    'template_file': str(self.template_path),
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                result = {
+                    'agent_id': self.agent_id,
+                    'status': 'error',
+                    'result': "项目规划生成失败",
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ {self.name} 处理用户请求失败: {e}")
+            return {'status': 'error', 'result': str(e)}
+
+    async def _generate_project_plan(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """生成项目计划的专用任务"""
+        return await self._handle_user_request(task)
+
+    async def _coordinate_team_tasks(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """协调团队任务"""
+        # 在这里实现任务协调逻辑
+        return {'status': 'completed', 'result': '团队任务已协调'}
+   

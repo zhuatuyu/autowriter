@@ -70,22 +70,25 @@ class WebSocketManager:
     async def send_message(self, session_id: str, message: dict):
         """发送消息到指定session"""
         if session_id not in self.connections:
-            print(f"❌ No connection found for session {session_id}")
+            print(f"⏳ No connection found for session {session_id}, queuing message")
             # 将消息添加到队列中，等待连接恢复
-            if session_id in self.message_queues:
-                self.message_queues[session_id].append(message)
+            if session_id not in self.message_queues:
+                self.message_queues[session_id] = deque(maxlen=100)
+            self.message_queues[session_id].append(message)
             return False
             
         try:
             websocket = self.connections[session_id]
             # 检查连接状态
             if websocket.client_state.name != 'CONNECTED':
-                print(f"❌ WebSocket not connected for session {session_id}")
-                if session_id in self.connections:
-                    del self.connections[session_id]
+                print(f"⚠️ WebSocket not connected for session {session_id}, state: {websocket.client_state.name}")
+                # 不立即删除连接，给一次机会
+                if session_id not in self.message_queues:
+                    self.message_queues[session_id] = deque(maxlen=100)
+                self.message_queues[session_id].append(message)
                 return False
                 
-            await websocket.send_text(json.dumps(message))
+            await websocket.send_text(json.dumps(message, ensure_ascii=False))
             print(f"✅ Message sent to session {session_id}: {message.get('type', 'unknown')}")
             return True
         except Exception as e:
@@ -93,8 +96,9 @@ class WebSocketManager:
             # 连接出错，移除连接并将消息加入队列
             if session_id in self.connections:
                 del self.connections[session_id]
-            if session_id in self.message_queues:
-                self.message_queues[session_id].append(message)
+            if session_id not in self.message_queues:
+                self.message_queues[session_id] = deque(maxlen=100)
+            self.message_queues[session_id].append(message)
             return False
     
     def get_connection_count(self, session_id: str) -> int:

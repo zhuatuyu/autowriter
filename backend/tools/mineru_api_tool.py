@@ -109,15 +109,93 @@ class MineruApiTool:
 
             raise TimeoutError(f"任务处理超时，已尝试 {max_attempts} 次")
 
-    async def process_file(self, file_path: Path) -> str:
+    async def process_file(self, file_path: str) -> dict:
         """
-        处理本地文件（需要先上传到可访问的URL）
-        注意：这个方法需要文件已经上传到可访问的URL
+        处理本地文件
         :param file_path: 本地文件路径
-        :return: 解析后的Markdown文本
+        :return: 包含处理结果的字典
         """
-        # 这里需要实现文件上传逻辑，或者提示用户提供URL
-        raise NotImplementedError("本地文件处理需要先上传到可访问的URL，请使用 process_url 方法")
+        try:
+            file_path = Path(file_path)
+            
+            if not file_path.exists():
+                return {
+                    'success': False,
+                    'error': f'文件不存在: {file_path}'
+                }
+            
+            # 检查文件大小（限制为50MB）
+            file_size = file_path.stat().st_size
+            if file_size > 50 * 1024 * 1024:
+                return {
+                    'success': False,
+                    'error': f'文件过大: {file_size / 1024 / 1024:.1f}MB，超过50MB限制'
+                }
+            
+            # 检查文件类型
+            supported_extensions = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md'}
+            if file_path.suffix.lower() not in supported_extensions:
+                return {
+                    'success': False,
+                    'error': f'不支持的文件类型: {file_path.suffix}'
+                }
+            
+            # 使用multipart/form-data上传文件
+            headers = {
+                'Authorization': f'Bearer {self.api_key}'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                with open(file_path, 'rb') as f:
+                    data = aiohttp.FormData()
+                    data.add_field('file', f, filename=file_path.name)
+                    data.add_field('is_ocr', 'true')
+                    data.add_field('enable_formula', 'false')
+                    
+                    print(f"🚀 正在上传文件 '{file_path.name}' 到 MinerU API...")
+                    
+                    async with session.post(self.base_url, headers=headers, data=data) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            return {
+                                'success': False,
+                                'error': f'API调用失败 (状态码: {response.status}): {error_text}'
+                            }
+                        
+                        result = await response.json()
+                        
+                        # 检查API响应
+                        if not result.get('success', False):
+                            return {
+                                'success': False,
+                                'error': f"API返回错误: {result.get('message', '未知错误')}"
+                            }
+                        
+                        task_id = result.get('data')
+                        if not task_id:
+                            return {
+                                'success': False,
+                                'error': 'API响应中未找到任务ID'
+                            }
+                        
+                        print(f"✅ 文件上传成功，任务ID: {task_id}")
+                        
+                        # 轮询任务结果
+                        markdown_content = await self._poll_task_result(task_id)
+                        
+                        return {
+                            'success': True,
+                            'markdown_content': markdown_content,
+                            'task_id': task_id,
+                            'file_name': file_path.name
+                        }
+                        
+        except Exception as e:
+            print(f"❌ 处理文件时发生错误: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
 
 # 创建一个全局工具实例，方便调用
 mineru_tool = MineruApiTool() 

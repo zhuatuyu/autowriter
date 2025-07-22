@@ -178,21 +178,19 @@ async def handle_user_intervention(session_id: str, message: dict):
     
     print(f"Received user message for session {session_id}: {user_message[:100]}...")
     
-    # 检查是否有活跃的WebSocket连接
-    if websocket_manager.get_connection_count(session_id) == 0:
-        print(f"⏳ No active connection for session {session_id}, waiting for reconnection...")
-        # 等待一小段时间让前端重新连接
-        await asyncio.sleep(1)
-        
-        # 再次检查连接
-        if websocket_manager.get_connection_count(session_id) == 0:
-            print(f"❌ Still no connection for session {session_id}, skipping message processing")
-            return
-    
-    # 广播用户消息给所有连接的客户端
+    # 立即回显用户消息
     await websocket_manager.send_message(session_id, {
-        "type": "user_intervention",
+        "type": "user_message",
+        "sender": "user",
         "content": user_message,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    # 发送处理中状态
+    await websocket_manager.send_message(session_id, {
+        "type": "system_message",
+        "sender": "system",
+        "content": "正在处理您的消息...",
         "timestamp": datetime.now().isoformat()
     })
     

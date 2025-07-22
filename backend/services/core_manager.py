@@ -42,6 +42,9 @@ class CoreManager:
         try:
             if session_id in self.active_sessions:
                 print(f"🔄 恢复现有会话: {session_id}")
+                # 检查Agent团队是否需要重新创建
+                if session_id not in self.agents:
+                    await self._create_agent_team(session_id)
                 return True
 
             print(f"🚀 启动新的智能工作会话: {session_id}")
@@ -50,24 +53,49 @@ class CoreManager:
             session_workspace = self.workspace_base / session_id
             session_workspace.mkdir(exist_ok=True)
             
+            # 检查是否是恢复旧项目
+            is_existing_project = self._check_existing_project(session_workspace)
+            
             # 初始化会话状态
             self.active_sessions[session_id] = {
                 'session_id': session_id,
                 'project_info': project_info or {},
                 'status': 'active',
                 'started_at': datetime.now().isoformat(),
-                'current_phase': 'initialization',
-                'workspace_path': str(session_workspace)
+                'current_phase': 'restoration' if is_existing_project else 'initialization',
+                'workspace_path': str(session_workspace),
+                'is_restored': is_existing_project
             }
             
             # 创建Agent团队
             await self._create_agent_team(session_id)
+            
+            if is_existing_project:
+                print(f"🧠 检测到现有项目，Agent团队正在恢复历史记忆...")
             
             print(f"✅ 会话 {session_id} 启动成功")
             return True
             
         except Exception as e:
             print(f"❌ 启动会话失败: {e}")
+            return False
+    
+    def _check_existing_project(self, workspace_path: Path) -> bool:
+        """检查是否是现有项目"""
+        try:
+            # 检查是否有Agent工作区
+            agent_dirs = ['document_expert', 'case_expert', 'writer_expert', 'data_analyst', 'chief_editor']
+            existing_agents = 0
+            
+            for agent_dir in agent_dirs:
+                agent_path = workspace_path / agent_dir
+                if agent_path.exists() and any(agent_path.iterdir()):
+                    existing_agents += 1
+            
+            # 如果有2个或以上的Agent有工作记录，认为是现有项目
+            return existing_agents >= 2
+        except Exception as e:
+            print(f"❌ 检查现有项目失败: {e}")
             return False
     
     async def _create_agent_team(self, session_id: str):
@@ -81,14 +109,14 @@ class CoreManager:
             # 1. 创建智能项目总监 (固定)
             director = IntelligentDirectorAgent(session_id, workspace_path)
             agents[director.agent_id] = director
-            print(f"  ✅ 创建Agent: {director.name} ({director.role})")
+            print(f"  ✅ 创建Agent: {director.name} ({director.profile})")
             
             # 2. 创建专业Agent团队
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
                 agent_workspace = Path(workspace_path) / agent_id
                 agent = agent_class(agent_id, session_id, str(agent_workspace))
                 agents[agent_id] = agent
-                print(f"  ✅ 创建Agent: {agent.name} ({agent.role})")
+                print(f"  ✅ 创建Agent: {agent.name} ({agent.profile})")
             
             self.agents[session_id] = agents
             
@@ -110,13 +138,13 @@ class CoreManager:
                     print(f"❌ 启动会话失败，无法处理消息")
                 return False
             
-            director = self.agents[session_id].get('intelligent-director')
+            director = self.agents[session_id].get('director')
             if not director:
                 print(f"❌ 智能项目总监在会话 {session_id} 中不存在")
                 return False
             
             # 将用户消息和所有专家代理传递给总监，由其全权负责
-            specialist_agents = {k: v for k, v in self.agents[session_id].items() if k != 'intelligent-director'}
+            specialist_agents = {k: v for k, v in self.agents[session_id].items() if k != 'director'}
             
             # IntelligentDirectorAgent将处理整个工作流程
             await director.handle_request(
@@ -154,7 +182,7 @@ class CoreManager:
             agents_status = []
             if session_id in self.agents:
                 for agent_id, agent in self.agents[session_id].items():
-                    if agent_id == 'intelligent-director':
+                    if agent_id == 'director':
                         continue  # 跳过项目总监，只显示专业Agent
                     agent_status = await agent.get_status()
                     agents_status.append(agent_status)
@@ -221,13 +249,13 @@ class CoreManager:
                 return
             
             # 获取智能项目总监
-            director = self.agents[session_id].get('intelligent-director')
+            director = self.agents[session_id].get('director')
             if not director:
                 print(f"❌ 智能项目总监不存在")
                 return
             
             # 获取专家团队
-            specialist_agents = {k: v for k, v in self.agents[session_id].items() if k != 'intelligent-director'}
+            specialist_agents = {k: v for k, v in self.agents[session_id].items() if k != 'director'}
             
             # 开始写作流程
             await websocket_manager.broadcast_agent_message(

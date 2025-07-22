@@ -104,7 +104,7 @@ class BaseAgent(Role):
         self.rc.memory = CustomLongTermMemory()
         logger.info(f"✅ {self.name} 已强制使用自定义长期记忆（无FAISS依赖）")
         
-        # 恢复记忆
+        # 恢复记忆，传递工作空间路径
         self._recover_memory()
         
         # 设置基础动作
@@ -113,9 +113,9 @@ class BaseAgent(Role):
     def _recover_memory(self):
         """恢复Agent的历史记忆"""
         try:
-            # 使用MetaGPT的记忆恢复机制
+            # 使用MetaGPT的记忆恢复机制，传递工作空间路径
             if hasattr(self.rc.memory, 'recover_memory'):
-                self.rc.memory.recover_memory(self.agent_id, self.rc)
+                self.rc.memory.recover_memory(self.agent_id, self.rc, self.agent_workspace)
                 logger.info(f"🧠 {self.name} 记忆恢复完成")
             
             # 从工作空间加载历史状态

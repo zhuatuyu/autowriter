@@ -10,7 +10,7 @@ from metagpt.memory import Memory
 from metagpt.roles.role import RoleContext
 from metagpt.schema import Message
 
-from backend.services.llm.custom_memory_storage import CustomMemoryStorage
+from backend.services.llm.simple_memory_storage import SimpleMemoryStorage
 
 
 class CustomLongTermMemory(Memory):
@@ -20,14 +20,14 @@ class CustomLongTermMemory(Memory):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    memory_storage: CustomMemoryStorage = Field(default_factory=CustomMemoryStorage)
+    memory_storage: SimpleMemoryStorage = Field(default_factory=SimpleMemoryStorage)
     rc: Optional[RoleContext] = None
     msg_from_recover: bool = False
 
-    def recover_memory(self, role_id: str, rc: RoleContext):
+    def recover_memory(self, role_id: str, rc: RoleContext, agent_workspace=None):
         """恢复记忆"""
         try:
-            self.memory_storage.recover_memory(role_id)
+            self.memory_storage.recover_memory(role_id, agent_workspace)
             self.rc = rc
             
             if not self.memory_storage.is_initialized:
@@ -43,12 +43,9 @@ class CustomLongTermMemory(Memory):
         try:
             super().add(message)
             
-            # 只有在监听的动作触发时才添加到长期存储
-            if self.rc and hasattr(self.rc, 'watch'):
-                for action in self.rc.watch:
-                    if message.cause_by == action and not self.msg_from_recover:
-                        self.memory_storage.add(message)
-                        break
+            # 将所有消息都添加到长期存储（简化版本）
+            if not self.msg_from_recover:
+                self.memory_storage.add(message)
                         
         except Exception as e:
             logger.error(f"❌ 添加记忆失败: {e}")

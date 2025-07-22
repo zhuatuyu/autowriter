@@ -47,28 +47,48 @@ class CustomMemoryStorage:
     def is_initialized(self) -> bool:
         return self._initialized
 
-    def recover_memory(self, role_id: str) -> List[Message]:
+    def recover_memory(self, role_id: str, agent_workspace: Path = None) -> List[Message]:
         """恢复记忆"""
         try:
             self.role_id = role_id
-            self.role_mem_path = Path(DATA_PATH / f"role_mem/{self.role_id}/")
+            
+            # 如果提供了agent_workspace，使用Agent的工作空间；否则使用全局路径
+            if agent_workspace:
+                self.role_mem_path = agent_workspace / "memory"
+            else:
+                self.role_mem_path = Path(DATA_PATH / f"role_mem/{self.role_id}/")
+            
             self.role_mem_path.mkdir(parents=True, exist_ok=True)
             self.cache_dir = self.role_mem_path
 
-            if self.role_mem_path.joinpath("default__vector_store.json").exists():
+            # 检查是否存在记忆文件
+            vector_store_file = self.role_mem_path / "default__vector_store.json"
+            docstore_file = self.role_mem_path / "docstore.json"
+            
+            if vector_store_file.exists() or docstore_file.exists():
                 logger.info(f"🧠 发现 {role_id} 的历史记忆，正在恢复...")
-                self.faiss_engine = VectorStoreIndex.load_from_disk(
-                    persist_dir=self.cache_dir,
-                    storage_context=StorageContext.from_defaults(persist_dir=self.cache_dir),
-                    service_context=self.embedding,
-                )
-                logger.info(f"✅ {role_id} 的历史记忆恢复成功")
+                try:
+                    # 使用我们的自定义embedding加载
+                    storage_context = StorageContext.from_defaults(persist_dir=str(self.cache_dir))
+                    self.faiss_engine = VectorStoreIndex.load_from_disk(
+                        persist_dir=str(self.cache_dir),
+                        storage_context=storage_context,
+                        embed_model=self.embedding
+                    )
+                    logger.info(f"✅ {role_id} 的历史记忆恢复成功")
+                except Exception as load_error:
+                    logger.warning(f"⚠️ 加载历史记忆失败: {load_error}，创建新的记忆存储")
+                    self.faiss_engine = VectorStoreIndex.from_documents(
+                        [], 
+                        embed_model=self.embedding,
+                        storage_context=StorageContext.from_defaults(persist_dir=str(self.cache_dir))
+                    )
             else:
                 logger.info(f"🆕 {role_id} 是新Agent，创建空记忆存储")
                 self.faiss_engine = VectorStoreIndex.from_documents(
-                    documents=[],
-                    storage_context=StorageContext.from_defaults(persist_dir=self.cache_dir),
-                    service_context=self.embedding,
+                    [], 
+                    embed_model=self.embedding,
+                    storage_context=StorageContext.from_defaults(persist_dir=str(self.cache_dir))
                 )
             
             self._initialized = True
@@ -78,12 +98,9 @@ class CustomMemoryStorage:
             logger.error(f"❌ 恢复记忆失败: {e}")
             # 创建空的记忆存储作为备用
             try:
-                self.faiss_engine = VectorStoreIndex.from_documents(
-                    documents=[],
-                    storage_context=StorageContext.from_defaults(persist_dir=self.cache_dir),
-                    service_context=self.embedding,
-                )
+                self.faiss_engine = VectorStoreIndex.from_documents([])
                 self._initialized = True
+                logger.info(f"✅ {role_id} 创建了备用空记忆存储")
             except Exception as e2:
                 logger.error(f"❌ 创建备用记忆存储也失败了: {e2}")
                 self._initialized = False
@@ -141,7 +158,7 @@ class CustomMemoryStorage:
         """持久化记忆存储"""
         try:
             if self.faiss_engine and self._initialized:
-                self.faiss_engine.storage_context.persist(self.cache_dir)
-                logger.debug(f"💾 {self.role_id} 的记忆已持久化")
+                self.faiss_engine.storage_context.persist(persist_dir=str(self.cache_dir))
+                logger.debug(f"💾 {self.role_id} 的记忆已持久化到 {self.cache_dir}")
         except Exception as e:
             logger.error(f"❌ 持久化记忆失败: {e}")

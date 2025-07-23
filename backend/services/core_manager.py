@@ -295,34 +295,6 @@ class CoreManager:
         }
         return name_map.get(agent_id, agent_id)
 
-    async def _handle_director_response(self, session_id: str, response: Dict[str, Any], websocket_manager=None):
-        """
-        (已废弃) 处理增强版Director的响应
-        """
-        pass
-    
-    async def _execute_simple_task(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
-        """
-        (已废弃) 执行简单任务
-        """
-        pass
-
-    async def _execute_complex_workflow(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
-        """
-        (已废弃) 执行复杂工作流
-        """
-        pass
-
-    async def _handle_consultation_followup(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
-        """
-        (已废弃) 处理咨询后续服务
-        """
-        pass
-    
-    async def _execute_agent_task(self, agent, agent_id: str) -> dict:
-        """(已废弃) 执行Agent任务"""
-        pass
-    
     async def get_session_status(self, session_id: str) -> Dict[str, Any]:
         """获取会话状态"""
         try:

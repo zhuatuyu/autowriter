@@ -91,38 +91,34 @@ class CaseExpertAgent(BaseAgent):
         logger.info(f"🔍 {self.name} 开始执行任务: {task.description}")
 
         # 从任务描述中提取查询关键词 (简化处理)
-        # 实际应用中可能需要更智能的实体提取
         query = task.description.replace("研究", "").replace("搜索", "").replace("案例", "").strip()
 
         try:
-            # 使用阿里巴巴搜索工具
-            search_results = await self.search_tool.search(query)
-            
-            if not search_results:
-                return {
-                    "status": "completed",
-                    "result": f"关于 '{query}' 的案例研究未找到相关结果。"
+            # 统一调用旧的、带文件保存的搜索逻辑
+            search_task_payload = {"keywords": query.split(), "domain": "综合领域"}
+            search_result_dict = await self._search_cases(search_task_payload)
+
+            # 检查执行状态
+            if search_result_dict.get("status") != "completed":
+                 return {
+                    "status": "error",
+                    "result": search_result_dict.get("result", "案例搜索失败，详情未知。")
                 }
 
-            # 格式化结果
-            formatted_result = {
-                "query": query,
-                "count": len(search_results),
-                "summary": f"找到了 {len(search_results)} 条关于 '{query}' 的相关案例。",
-                "results": search_results
-            }
-            
+            # 成功后，将结果格式化以符合新架构的期望
             return {
                 "status": "completed",
-                "result": formatted_result
+                "result": {
+                    "message": f"关于 '{query}' 的案例研究已完成。",
+                    "summary": search_result_dict.get("summary", "无摘要"),
+                    "files_created": search_result_dict.get("files_created", []),
+                }
             }
+
         except Exception as e:
             error_msg = f"❌ 执行案例研究时出错: {e}"
-            logger.error(error_msg)
-            return {
-                "status": "error",
-                "result": error_msg
-            }
+            logger.error(error_msg, exc_info=True)
+            return {"status": "error", "result": error_msg}
 
     async def _search_cases(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """搜索相关案例"""
@@ -148,9 +144,8 @@ class CaseExpertAgent(BaseAgent):
                 self.progress = 20 + (i * 20)
                 logger.info(f"🔍 {self.name} 搜索: {query}")
                 
-                # 执行搜索
-                search_action = CaseSearchAction()
-                search_results = await search_action.run(query)
+                # 执行搜索 - 直接使用Agent自己的工具，不再创建临时的Action实例
+                search_results = await self.search_tool.run(query)
                 
                 # 保存搜索结果
                 result_file = self.searches_dir / f"search_{query.replace(' ', '_')}_{datetime.now().strftime('%H%M%S')}.md"
@@ -186,7 +181,7 @@ class CaseExpertAgent(BaseAgent):
                 'result': f"已完成 {domain} 相关案例搜索，共搜索 {len(queries)} 个关键词，生成 {len(files_created)} 个文件",
                 'files_created': files_created,
                 'search_queries': queries,
-                'summary': summary[:300] + "..." if len(summary) > 300 else summary,
+                'summary': summary, # 返回完整的摘要内容
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -194,7 +189,11 @@ class CaseExpertAgent(BaseAgent):
             
         except Exception as e:
             logger.error(f"❌ {self.name} 案例搜索失败: {e}")
-            raise
+            return {
+                'agent_id': self.agent_id,
+                'status': 'error',
+                'result': f"案例搜索失败: {e}",
+            }
 
     async def _analyze_cases(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """分析已搜索的案例"""

@@ -186,13 +186,13 @@ async def handle_user_intervention(session_id: str, message: dict):
         "timestamp": datetime.now().isoformat()
     })
     
-    # 发送处理中状态
-    await websocket_manager.send_message(session_id, {
-        "type": "system_message",
-        "sender": "system",
-        "content": "正在处理您的消息...",
-        "timestamp": datetime.now().isoformat()
-    })
+    # 不再发送多余的“正在处理中”状态
+    # await websocket_manager.send_message(session_id, {
+    #     "type": "system_message",
+    #     "sender": "system",
+    #     "content": "正在处理您的消息...",
+    #     "timestamp": datetime.now().isoformat()
+    # })
     
     # 检查是否需要启动分析
     session_status = await core_manager.get_session_status(session_id)

@@ -268,3 +268,58 @@ class DirectorAgent(BaseAgent):
             logger.error(f"无法解析LLM返回的修订版Plan JSON: {e}\n原始返回: {response_json_str}")
             # 如果修订失败，返回原始计划
             return original_plan
+
+    async def direct_answer(self, user_message: str, intent: str) -> str:
+        """
+        直接回答用户的非规划类问题
+        """
+        logger.info(f"🎯 直接回答用户问题, 意图: {intent}, 内容: {user_message}")
+        
+        # 1. 准备上下文
+        history = self._memory_adapter.get_conversation_history(limit=10)
+        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+        
+        # 2. 根据不同意图，构建不同的prompt
+        if intent == 'status_inquiry':
+            # 对于状态查询，需要获取工作区状态
+            # (这是一个简化版，实际可以做的更复杂，比如从planner获取执行进度)
+            team_summary = self._memory_adapter.get_team_summary()
+            status_context = json.dumps(team_summary, ensure_ascii=False, indent=2)
+            
+            prompt = f"""
+# 指令：作为AI项目总监，根据上下文和当前项目状态，回答用户的状态查询。
+
+## 对话历史
+{formatted_history}
+
+## 当前项目状态摘要
+{status_context}
+
+## 用户问题
+"{user_message}"
+
+---
+请用人性化的语言，清晰地回答用户关于项目进展的问题。
+"""
+        else: #  trivial_chat, simple_qa, contextual_follow_up
+            prompt = f"""
+# 指令：作为AI项目总监，根据上下文，用人性化、专业的语言回答用户的问题。
+
+## 对话历史
+{formatted_history}
+
+## 用户最新消息
+"{user_message}"
+
+---
+请直接回答用户。如果是闲聊，请礼貌回应；如果是问题，请提供简洁、准确的答案；如果是追问，请结合上下文进行解释。
+"""
+            
+        # 3. 调用LLM生成答案
+        answer = await self.llm.aask(prompt)
+        
+        # 4. 记录交互
+        self._record_user_message(user_message)
+        self._memory_adapter.add_simple_message(content=answer, role=self.profile, cause_by=f"direct_answer_{intent}")
+        
+        return answer.strip()

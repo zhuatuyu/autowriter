@@ -141,7 +141,7 @@ class CoreManager:
     
     async def handle_user_message(self, session_id: str, user_message: str, websocket_manager=None) -> bool:
         """
-        处理用户消息，遵循 Director -> Planner -> Experts 的新流程
+        处理用户消息 - 智能调度版本
         """
         try:
             print(f"👤 收到用户消息 [{session_id}]: {user_message[:80]}...")
@@ -150,18 +150,31 @@ class CoreManager:
                 await self.start_session(session_id)
             
             session_context = self.sessions_context[session_id]
-            agents = session_context.get('agents', {})
-            director = agents.get('director')
-            planner = agents.get('planner')
+            director = session_context['agents'].get('director')
 
-            # 检查是否有待处理的计划
-            pending_plan = session_context.get('current_plan')
+            if not director:
+                 print(f"❌ 核心Agent（Director）在会话 {session_id} 中不存在。")
+                 return False
 
-            if pending_plan:
-                # 场景2：用户对计划进行反馈
-                return await self._handle_plan_feedback(session_id, user_message, pending_plan, websocket_manager)
-            else:
-                # 场景1：用户发起新请求
+            # 步骤 1: 智能分类用户意图
+            intent = await self._classify_user_intent(session_context, user_message)
+
+            # 步骤 2: 根据意图进行调度
+            if intent == 'plan_feedback':
+                pending_plan = session_context.get('current_plan')
+                if pending_plan:
+                    return await self._handle_plan_feedback(session_id, user_message, pending_plan, websocket_manager)
+                else:
+                    # 如果没有待审批计划，却被识别为反馈，当作新请求处理
+                    return await self._handle_new_request(session_id, user_message, websocket_manager)
+            
+            elif intent in ['trivial_chat', 'simple_qa', 'contextual_follow_up', 'status_inquiry']:
+                return await self._handle_direct_answer(session_id, user_message, intent, websocket_manager)
+
+            elif intent == 'planning_request':
+                return await self._handle_new_request(session_id, user_message, websocket_manager)
+                
+            else: # 默认作为新请求处理
                 return await self._handle_new_request(session_id, user_message, websocket_manager)
 
         except Exception as e:
@@ -170,6 +183,79 @@ class CoreManager:
                 await websocket_manager.broadcast_agent_message(session_id, "system", "系统错误", f"处理您的请求时发生错误: {e}", "error")
             return False
     
+    async def _classify_user_intent(self, session_context: Dict[str, Any], user_message: str) -> str:
+        """使用LLM对用户意图进行分类"""
+        director = session_context['agents']['director']
+        pending_plan = session_context.get('current_plan')
+        
+        # 准备上下文
+        history = director._memory_adapter.get_conversation_history(limit=5)
+        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+
+        # 构建分类Prompt - 修正f-string中的反斜杠问题
+        plan_context_str = ""
+        if pending_plan:
+            formatted_plan = self._format_plan_for_approval(pending_plan)
+            plan_context_str = f"\n---\n## 待审批的计划\n你已经向用户提出了以下计划，正在等待用户反馈：\n{formatted_plan}\n---"
+
+        prompt = f"""
+# 指令：分析用户意图
+
+根据对话历史和用户最新消息，将用户意图分类到以下类别之一。
+
+## 对话历史
+{formatted_history}
+{plan_context_str}
+## 用户最新消息
+"{user_message}"
+
+## 意图类别
+1.  **trivial_chat**: 简单的问候、感谢或无关的闲聊。 (例如: "你好", "谢谢你", "今天天气不错")
+2.  **simple_qa**: 关于某个主题的直接问题，可以由专家一次性回答，不需要多步骤计划。(例如: "绩效报告的关键要素是什么？", "写摘要有什么技巧？")
+3.  **contextual_follow_up**: 对上一轮对话的追问，依赖紧密的上下文。(例如: "继续说", "详细解释一下", "为什么？")
+4.  **status_inquiry**: 查询项目或任务的当前状态。(例如: "我们上次聊到哪了?", "报告写得怎么样了？")
+5.  **planning_request**: 提出一个需要多个步骤或多个专家协作才能完成的复杂需求。(例如: "帮我写一份关于XX的报告", "分析一下这份文件并给出改进建议")
+6.  **plan_feedback**: (仅当存在'待审批的计划'时) 用户对你提出的计划进行反馈，无论是同意、否定还是提出修改意见。
+
+请只输出最匹配的意图类别名称（例如: `planning_request`）。
+"""
+        # 使用Director的LLM进行分类
+        # 注意：实际项目中可以考虑使用更小、更快的模型进行分类
+        intent = await director.llm.aask(prompt)
+        
+        # 清理并验证返回结果
+        intent = intent.strip().lower()
+        valid_intents = ['trivial_chat', 'simple_qa', 'contextual_follow_up', 'status_inquiry', 'planning_request', 'plan_feedback']
+        
+        if intent not in valid_intents:
+            # 如果LLM返回无效内容，根据有无待审批计划做一个基本判断
+            print(f"LLM返回了无效的意图分类: '{intent}'，将使用回退逻辑。")
+            return 'plan_feedback' if pending_plan else 'planning_request'
+            
+        print(f"🧠 用户意图被分类为: {intent}")
+        return intent
+
+    async def _handle_direct_answer(self, session_id: str, user_message: str, intent: str, websocket_manager=None) -> bool:
+        """处理直接问答类的请求"""
+        session_context = self.sessions_context[session_id]
+        director = session_context['agents']['director']
+
+        if websocket_manager:
+            await websocket_manager.broadcast_agent_message(session_id, "director", director.name, "正在思考您的问题...", "working")
+        
+        # 让Director直接回答
+        answer = await director.direct_answer(user_message, intent)
+        
+        if websocket_manager:
+            await websocket_manager.broadcast_agent_message(
+                session_id=session_id,
+                agent_type="director",
+                agent_name=director.name,
+                content=answer,
+                status="completed"
+            )
+        return True
+
     async def _handle_new_request(self, session_id: str, user_message: str, websocket_manager=None) -> bool:
         """处理新的用户请求，生成待审核的计划"""
         session_context = self.sessions_context[session_id]

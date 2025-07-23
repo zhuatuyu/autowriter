@@ -9,14 +9,15 @@ from datetime import datetime
 from pathlib import Path
 
 # 调整导入路径以适应新的Agent结构
-from backend.services.llm.agents.enhanced_director import EnhancedDirectorAgent
+from backend.services.llm.agents.director import DirectorAgent
 from backend.services.llm.agents.document_expert import DocumentExpertAgent
 from backend.services.llm.agents.case_expert import CaseExpertAgent
 from backend.services.llm.agents.writer_expert import WriterExpertAgent
 from backend.services.llm.agents.data_analyst import DataAnalystAgent
 from backend.services.llm.agents.chief_editor import ChiefEditorAgent
+from backend.services.llm.agents.planner import PlannerAgent
 
-# Agent团队配置
+# Agent团队配置 (不包含Director和Planner)
 AGENT_TEAM_CONFIG = {
     'document_expert': DocumentExpertAgent,
     'case_expert': CaseExpertAgent,
@@ -60,7 +61,8 @@ class CoreManager:
                 'started_at': datetime.now().isoformat(),
                 'workspace_path': str(session_workspace),
                 'agents': {},
-                'memory_manager': memory_manager
+                'memory_manager': memory_manager,
+                'current_plan': None # 新增：用于存放待用户确认的计划
             }
             
             # 创建Agent团队
@@ -100,17 +102,27 @@ class CoreManager:
             
             agents = {}
             
-            # 1. 创建增强版智能项目总监 (固定)
-            director_workspace = Path(workspace_path) / "enhanced_director"
-            director = EnhancedDirectorAgent(
+            # 1. 创建总监 (Director)
+            director_workspace = Path(workspace_path) / "director"
+            director = DirectorAgent(
                 session_id=session_id,
                 workspace_path=str(director_workspace),
                 memory_manager=memory_manager
             )
             agents[director.agent_id] = director
             print(f"  ✅ 创建Agent: {director.name} ({director.role})")
+
+            # 2. 创建规划执行者 (Planner)
+            planner_workspace = Path(workspace_path) / "planner"
+            planner = PlannerAgent(
+                session_id=session_id,
+                workspace_path=str(planner_workspace),
+                memory_manager=memory_manager
+            )
+            agents[planner.agent_id] = planner
+            print(f"  ✅ 创建Agent: {planner.name} ({planner.role})")
             
-            # 2. 创建专业Agent团队
+            # 3. 创建专业Agent团队
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
                 agent_workspace = Path(workspace_path) / agent_id
                 agent = agent_class(
@@ -129,279 +141,187 @@ class CoreManager:
     
     async def handle_user_message(self, session_id: str, user_message: str, websocket_manager=None) -> bool:
         """
-        处理用户消息，使用增强版Director进行智能处理
+        处理用户消息，遵循 Director -> Planner -> Experts 的新流程
         """
         try:
             print(f"👤 收到用户消息 [{session_id}]: {user_message[:80]}...")
             
             if session_id not in self.sessions_context:
-                print(f"❌ 会话 {session_id} 不存在，正在尝试重新启动...")
                 await self.start_session(session_id)
-                if session_id not in self.sessions_context:
-                    print(f"❌ 启动会话失败，无法处理消息")
-                    return False
             
             session_context = self.sessions_context[session_id]
-            
-            # 获取增强版Director
-            director = session_context['agents'].get('enhanced_director')
-            if not director:
-                print(f"❌ 增强版智能项目总监在会话 {session_id} 中不存在")
-                return False
-            
-            # 构建上下文信息
-            context = {
-                'session_id': session_id,
-                'session_info': {k: v for k, v in session_context.items() if k not in ['agents', 'memory_manager']},
-                'available_agents': list(session_context['agents'].keys())
-            }
-            
-            # 使用增强版Director的新接口处理请求
-            response = await director.process_request(user_message, context)
-            
-            # 发送Director的响应
-            if websocket_manager and response.get('success'):
-                await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="enhanced_director",
-                    agent_name=director.name,
-                    content=response.get('message', '处理完成'),
-                    status="completed"
-                )
-                
-                # 根据响应类型执行后续行动
-                await self._handle_director_response(session_id, response, websocket_manager)
-            
-            # 更新会话状态
-            self.sessions_context[session_id]['status'] = 'in_progress'
-            return True
-            
+            agents = session_context.get('agents', {})
+            director = agents.get('director')
+            planner = agents.get('planner')
+
+            # 检查是否有待处理的计划
+            pending_plan = session_context.get('current_plan')
+
+            if pending_plan:
+                # 场景2：用户对计划进行反馈
+                return await self._handle_plan_feedback(session_id, user_message, pending_plan, websocket_manager)
+            else:
+                # 场景1：用户发起新请求
+                return await self._handle_new_request(session_id, user_message, websocket_manager)
+
         except Exception as e:
             print(f"❌ 处理用户消息时发生严重错误: {e}")
             if websocket_manager:
-                await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="system_error",
-                    agent_name="系统错误",
-                    content=f"处理请求时发生错误: {e}",
-                    status="error"
-                )
+                await websocket_manager.broadcast_agent_message(session_id, "system", "系统错误", f"处理您的请求时发生错误: {e}", "error")
             return False
     
+    async def _handle_new_request(self, session_id: str, user_message: str, websocket_manager=None) -> bool:
+        """处理新的用户请求，生成待审核的计划"""
+        session_context = self.sessions_context[session_id]
+        director = session_context['agents']['director']
+
+        if websocket_manager:
+            await websocket_manager.broadcast_agent_message(session_id, "director", director.name, "正在理解您的需求，并为您草拟一份行动计划...", "working")
+        
+        # 步骤 1: Director接收用户需求，生成初步Plan
+        plan = await director.process_request(user_message)
+        
+        # 步骤 2: 保存待审核的Plan
+        session_context['current_plan'] = plan
+        
+        # 步骤 3: 将Plan格式化后发给用户征求意见
+        plan_for_approval = self._format_plan_for_approval(plan)
+        if websocket_manager:
+            await websocket_manager.broadcast_agent_message(
+                session_id=session_id,
+                agent_type="director",
+                agent_name=director.name,
+                content=plan_for_approval,
+                status="pending_approval" # 使用新状态
+            )
+        return True
+
+    async def _handle_plan_feedback(self, session_id: str, user_message: str, plan: Any, websocket_manager=None) -> bool:
+        """处理用户对计划的反馈"""
+        session_context = self.sessions_context[session_id]
+        director = session_context['agents']['director']
+        planner = session_context['agents']['planner']
+
+        # 简单判断用户是否同意
+        if "同意" in user_message or "可以" in user_message or "ok" in user_message.lower():
+            # 用户同意，开始执行计划
+            session_context['current_plan'] = None # 清空待审计划
+            
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(session_id, "planner", planner.name, f"收到您的确认！计划已启动，共 {len(plan.tasks)} 个步骤，开始执行...", "working")
+            
+            final_result = await planner.execute_plan(plan, session_context['agents'])
+            final_response = self._format_final_response(final_result)
+            
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(session_id, "director", director.name, final_response, "completed")
+        else:
+            # 用户有补充意见，让Director修订计划
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(session_id, "director", director.name, f"收到您的反馈：'{user_message[:50]}...'。正在为您修订计划...", "working")
+            
+            # 将用户的补充意见和原计划一起发给Director进行修订
+            # (这是一个简化的实现，实际可能需要更复杂的prompt)
+            revised_plan = await director.revise_plan(plan, user_message)
+            session_context['current_plan'] = revised_plan # 保存修订后的计划
+            
+            plan_for_approval = self._format_plan_for_approval(revised_plan)
+            if websocket_manager:
+                 await websocket_manager.broadcast_agent_message(
+                    session_id=session_id,
+                    agent_type="director",
+                    agent_name=director.name,
+                    content=plan_for_approval,
+                    status="pending_approval"
+                )
+        return True
+
+    def _format_plan_for_approval(self, plan: Any) -> str:
+        """将Plan对象格式化为易于用户理解的字符串"""
+        response = f"**我已经为您制定了如下行动计划，请您审阅：**\n\n"
+        response += f"**🎯 最终目标:** {plan.goal}\n\n"
+        response += "**📝 步骤如下:**\n"
+        for i, task in enumerate(plan.tasks, 1):
+            response += f"{i}. {task.description}\n"
+        
+        response += "\n---\n"
+        response += "**请问您是否同意此计划？** 您可以直接回复“同意”开始执行，或者提出您的修改意见，例如：“补充一下，第2步应该先搜索政府网站的公开数据”。"
+        return response
+
+    def _format_final_response(self, final_result: Dict[str, Any]) -> str:
+        """
+        格式化最终结果以便展示，现在只进行状态汇报
+        """
+        goal = final_result.get("goal")
+        status = final_result.get("status")
+        tasks = final_result.get("tasks", [])
+        
+        if status == "completed":
+            response = f"**项目目标 “{goal}” 已成功完成！**\n\n"
+            response += "所有任务均已执行完毕。您可以随时查阅各个专家的工作区以获取详细的成果文件。"
+            
+            # (可选) 提供一个最终产出任务的提示
+            if tasks:
+                final_task = tasks[-1]
+                owner_agent_name = self._get_agent_name_by_id(final_task.get("owner"))
+                if owner_agent_name:
+                    response += f"\n\n*主要成果（例如报告初稿）通常由 **{owner_agent_name}** 完成，请重点关注其工作区。*"
+
+        else:
+            response = f"**很抱歉，项目目标 “{goal}” 未能成功完成。**\n\n"
+            # 找到出错的任务
+            failed_task_info = ""
+            for task in tasks:
+                if task.get('status') == 'error':
+                    owner_agent_name = self._get_agent_name_by_id(task.get("owner"))
+                    failed_task_info = f"在 **{owner_agent_name}** 执行任务 **“{task.get('description')}”** 时遇到问题。\n\n**错误详情:**\n{task.get('result')}"
+                    break
+            response += failed_task_info if failed_task_info else "执行过程中发生未知错误，请检查后台日志获取更多信息。"
+
+        return response
+    
+    def _get_agent_name_by_id(self, agent_id: str) -> str:
+        """根据agent_id获取在AGENT_TEAM_CONFIG中定义的名字"""
+        # 这是一个简化的辅助函数，需要CoreManager能够访问到Agent的实例或配置
+        # 暂时硬编码名字
+        name_map = {
+            "director": "智能项目总监",
+            "planner": "规划执行者",
+            "document_expert": "文档专家（李心悦）",
+            "case_expert": "案例专家（王磊）",
+            "writer_expert": "写作专家（张翰）",
+            "data_analyst": "数据分析师（赵丽娅）",
+            "chief_editor": "总编辑（钱敏）",
+        }
+        return name_map.get(agent_id, agent_id)
+
     async def _handle_director_response(self, session_id: str, response: Dict[str, Any], websocket_manager=None):
         """
-        处理增强版Director的响应，根据响应类型执行相应的后续行动
+        (已废弃) 处理增强版Director的响应
         """
-        try:
-            response_type = response.get('response_type', 'communication')
-            next_actions = response.get('next_actions', [])
-            
-            print(f"📋 Director响应类型: {response_type}, 后续行动: {next_actions}")
-            
-            if response_type == 'direct_answer':
-                # 直接回答，无需进一步处理
-                print(f"✅ Director直接回答了用户问题")
-                
-            elif response_type == 'simple_task' and next_actions:
-                # 简单任务，委托给单个Agent
-                await self._execute_simple_task(session_id, response, websocket_manager)
-                
-            elif response_type == 'complex_workflow' and next_actions:
-                # 复杂工作流，需要多Agent协作
-                await self._execute_complex_workflow(session_id, response, websocket_manager)
-                
-            elif response_type == 'consultation':
-                # 专业咨询，可能需要后续服务
-                await self._handle_consultation_followup(session_id, response, websocket_manager)
-                
-            else:
-                # 其他类型的响应，记录日志
-                print(f"📝 Director响应类型: {response_type}")
-                
-        except Exception as e:
-            print(f"❌ 处理Director响应失败: {e}")
+        pass
     
     async def _execute_simple_task(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
         """
-        执行简单任务 - 委托给单个Agent
+        (已废弃) 执行简单任务
         """
-        try:
-            next_actions = director_response.get('next_actions', [])
-            if not next_actions:
-                return
-            
-            target_agent_id = next_actions[0]
-            
-            agents = self.sessions_context[session_id]['agents']
+        pass
 
-            # 获取目标Agent
-            if target_agent_id in agents:
-                agent = agents[target_agent_id]
-                
-                # 通知开始执行任务
-                if websocket_manager:
-                    await websocket_manager.broadcast_agent_message(
-                        session_id=session_id,
-                        agent_type=target_agent_id,
-                        agent_name=getattr(agent, 'name', target_agent_id),
-                        content=f"🔄 正在处理您的请求...",
-                        status="working"
-                    )
-                
-                # 执行Agent任务
-                task_result = await self._execute_agent_task(agent, target_agent_id)
-                
-                # 发送完成消息
-                if websocket_manager:
-                    result_message = task_result.get('result', '任务完成') if task_result else '任务完成'
-                    await websocket_manager.broadcast_agent_message(
-                        session_id=session_id,
-                        agent_type=target_agent_id,
-                        agent_name=getattr(agent, 'name', target_agent_id),
-                        content=f"✅ {result_message}",
-                        status="completed"
-                    )
-            else:
-                print(f"❌ 目标Agent {target_agent_id} 不存在")
-                
-        except Exception as e:
-            print(f"❌ 执行简单任务失败: {e}")
-    
     async def _execute_complex_workflow(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
         """
-        执行复杂工作流 - 多Agent协作
+        (已废弃) 执行复杂工作流
         """
-        try:
-            task_plan = director_response.get('task_plan', {})
-            steps = task_plan.get('steps', [])
-            agents = self.sessions_context[session_id]['agents']
+        pass
 
-            if websocket_manager:
-                await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="enhanced_director",
-                    agent_name="智能项目总监",
-                    content=f"🚀 开始执行复杂工作流，共{len(steps)}个步骤",
-                    status="working"
-                )
-            
-            # 按步骤执行
-            for i, step in enumerate(steps, 1):
-                agent_id = step.get('agent_id')
-                action = step.get('action', 'process_user_request')
-                
-                if agent_id in agents:
-                    agent = agents[agent_id]
-                    
-                    # 通知步骤开始
-                    if websocket_manager:
-                        await websocket_manager.broadcast_agent_message(
-                            session_id=session_id,
-                            agent_type=agent_id,
-                            agent_name=getattr(agent, 'name', agent_id),
-                            content=f"🔄 执行步骤 {i}/{len(steps)}: {step.get('expected_output', '处理中')}",
-                            status="working"
-                        )
-                    
-                    # 执行步骤
-                    step_result = await self._execute_agent_task(agent, agent_id)
-                    
-                    # 通知步骤完成
-                    if websocket_manager:
-                        result_message = step_result.get('result', '步骤完成') if step_result else '步骤完成'
-                        await websocket_manager.broadcast_agent_message(
-                            session_id=session_id,
-                            agent_type=agent_id,
-                            agent_name=getattr(agent, 'name', agent_id),
-                            content=f"✅ 步骤 {i} 完成: {result_message}",
-                            status="completed"
-                        )
-                    
-                    # 步骤间延迟
-                    await asyncio.sleep(1)
-            
-            # 工作流完成
-            if websocket_manager:
-                await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="enhanced_director",
-                    agent_name="智能项目总监",
-                    content="🎉 复杂工作流执行完成！所有步骤已成功完成。",
-                    status="completed"
-                )
-                
-        except Exception as e:
-            print(f"❌ 执行复杂工作流失败: {e}")
-    
     async def _handle_consultation_followup(self, session_id: str, director_response: Dict[str, Any], websocket_manager=None):
         """
-        处理咨询后续服务
+        (已废弃) 处理咨询后续服务
         """
-        try:
-            follow_up_services = director_response.get('follow_up_services', [])
-            
-            if follow_up_services and websocket_manager:
-                services_text = "\n".join([f"• {service}" for service in follow_up_services])
-                await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="enhanced_director",
-                    agent_name="智能项目总监",
-                    content=f"💡 如需进一步协助，我的团队可以提供以下服务：\n\n{services_text}",
-                    status="completed"
-                )
-                
-        except Exception as e:
-            print(f"❌ 处理咨询后续服务失败: {e}")
+        pass
     
     async def _execute_agent_task(self, agent, agent_id: str) -> dict:
-        """执行Agent任务"""
-        try:
-            # 根据Agent类型创建不同的任务
-            if agent_id == "document_expert":
-                task = {
-                    "type": "document_analysis",
-                    "description": "分析上传的文档并提取关键信息"
-                }
-            elif agent_id == "case_expert":
-                task = {
-                    "type": "case_research",
-                    "description": "搜索相关案例和最佳实践"
-                }
-            elif agent_id == "data_analyst":
-                task = {
-                    "type": "data_analysis",
-                    "description": "进行数据收集和统计分析"
-                }
-            elif agent_id == "writer_expert":
-                task = {
-                    "type": "writing",
-                    "chapter": "综合报告",
-                    "requirements": "基于前期分析结果撰写完整报告",
-                    "description": "撰写报告初稿"
-                }
-            elif agent_id == "chief_editor":
-                task = {
-                    "type": "editing",
-                    "description": "审核和润色报告内容"
-                }
-            else:
-                task = {
-                    "type": "general",
-                    "description": "执行通用任务"
-                }
-            
-            # 执行任务
-            if hasattr(agent, 'execute_task'):
-                result = await agent.execute_task(task)
-            else:
-                # 如果Agent没有execute_task方法，使用默认处理
-                result = {"result": f"{agent_id}任务完成", "status": "completed"}
-            
-            return result
-            
-        except Exception as e:
-            print(f"❌ 执行Agent任务失败: {e}")
-            return {"result": f"任务执行出错: {str(e)}", "status": "error"}
+        """(已废弃) 执行Agent任务"""
+        pass
     
     async def get_session_status(self, session_id: str) -> Dict[str, Any]:
         """获取会话状态"""
@@ -416,8 +336,8 @@ class CoreManager:
             agents_status = []
             if 'agents' in session_context:
                 for agent_id, agent in session_context['agents'].items():
-                    if agent_id == 'enhanced_director':
-                        continue  # 跳过项目总监，只显示专业Agent
+                    if agent_id in ['director', 'planner']:
+                        continue  # 跳过核心Agent，只显示专业Agent
                     
                     if hasattr(agent, 'get_status'):
                         agent_status = await agent.get_status()

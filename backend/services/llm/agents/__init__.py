@@ -4,7 +4,7 @@ Contains all the specialized agent implementations
 """
 
 from .base import BaseAgent
-from .director import IntelligentDirectorAgent
+from .director import DirectorAgent
 from .document_expert import DocumentExpertAgent
 from .case_expert import CaseExpertAgent
 from .writer_expert import WriterExpertAgent
@@ -13,7 +13,7 @@ from .chief_editor import ChiefEditorAgent
 
 __all__ = [
     'BaseAgent',
-    'IntelligentDirectorAgent',
+    'DirectorAgent',
     'DocumentExpertAgent',
     'CaseExpertAgent',
     'WriterExpertAgent',

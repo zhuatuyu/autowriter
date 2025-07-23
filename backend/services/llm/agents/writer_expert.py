@@ -6,6 +6,8 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
+import json
+import re
 
 from metagpt.actions import Action
 from metagpt.schema import Message
@@ -156,70 +158,51 @@ class WriterExpertAgent(BaseAgent):
 """
         }
     
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
-        """执行具体的写作任务"""
-        try:
-            task_type = task.get('type', 'write_content')
-            
-            if task_type == 'write_content':
-                return await self._write_content(task)
-            elif task_type == 'review_content':
-                return await self._review_content(task)
-            elif task_type == 'optimize_content':
-                return await self._optimize_content(task)
-            else:
-                return await self._write_content(task)  # 默认执行内容写作
-                
-        except Exception as e:
-            logger.error(f"❌ {self.name} 执行任务失败: {e}")
-            return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f'任务执行失败: {str(e)}',
-                'error': str(e)
-            }
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行具体的写作任务
+        task.description 会包含写作要求
+        context 会包含上游任务（如数据分析、案例研究）的结果
+        """
+        logger.info(f"✍️ {self.name} 开始执行任务: {task.description}")
 
-    async def _write_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """撰写内容"""
+        # 将上下文信息格式化，以便LLM理解
+        context_str = json.dumps(context, ensure_ascii=False, indent=2)
+        
+        # 提取章节标题 (简化处理)
+        chapter_title_match = re.search(r"撰写(.*?)章节", task.description)
+        chapter_title = chapter_title_match.group(1).strip() if chapter_title_match else "综合内容"
+
+        writing_action = ContentWritingAction()
+        
         try:
-            chapter = task.get('chapter', '未知章节')
-            requirements = task.get('requirements', '无特定要求')
-            context = task.get('context', '无')
-            
-            self.current_task = f"正在撰写：{chapter}"
-            self.progress = 10
-            
-            # 执行写作动作
-            writing_action = ContentWritingAction()
-            draft_content = await writing_action.run(chapter, requirements, context)
-            
-            self.progress = 70
+            # 调用Action执行写作
+            written_content = await writing_action.run(
+                chapter=chapter_title,
+                requirements=task.description,
+                context=context_str
+            )
             
             # 保存草稿
-            draft_file = self.drafts_dir / f'{chapter.replace(" ", "_").replace(":", "_")}_{datetime.now().strftime("%H%M%S")}.md'
-            with open(draft_file, 'w', encoding='utf-8') as f:
-                f.write(f"# {chapter}\n\n")
-                f.write(f"**撰写时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"**撰写专家**: {self.name}\n\n")
-                f.write(draft_content)
-                f.write(f"\n\n---\n*初稿完成: {self.name} ✍️*")
-            
-            self.progress = 100
-            
-            result = {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': f"已完成《{chapter}》的撰写，共 {len(draft_content)} 字符",
-                'files_created': [draft_file.name],
-                'content_preview': draft_content[:200] + "..." if len(draft_content) > 200 else draft_content,
-                'timestamp': datetime.now().isoformat()
+            draft_path = self.drafts_dir / f"{chapter_title.replace(' ', '_')}_{task.id}.md"
+            with open(draft_path, "w", encoding="utf-8") as f:
+                f.write(written_content)
+
+            return {
+                "status": "completed",
+                "result": {
+                    "message": f"章节 '{chapter_title}' 的初稿已完成。",
+                    "draft_file": str(draft_path),
+                    "content_preview": written_content[:200] + "..."
+                }
             }
-            
-            return result
-            
         except Exception as e:
-            logger.error(f"❌ {self.name} 内容撰写失败: {e}")
-            raise
+            error_msg = f"❌ 执行写作任务时出错: {e}"
+            logger.error(error_msg)
+            return {
+                "status": "error",
+                "result": error_msg
+            }
 
     async def _review_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """审核内容"""

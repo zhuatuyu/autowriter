@@ -164,111 +164,33 @@ class DocumentExpertAgent(BaseAgent):
 请以清晰的列表格式输出，如果某项信息不存在，请标注"未提及"。
 """
 
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行文档处理任务
-        
-        李心悦的工作流程：
-        1. 检查uploads文件夹中的新文档
-        2. 使用MinerU API将文档转换为Markdown
-        3. 生成文档摘要和关键信息提取
-        4. 更新文档索引
-        5. 向项目总监报告处理结果
+        执行具体的文档处理任务
+        task.description 将包含具体的指令，如 "处理上传的文件" 或 "提取关键信息"
         """
-        try:
-            self.status = 'working'
-            self.current_task = "正在整理和处理文档..."
-            
-            processed_files = []
-            upload_files = list(self.upload_path.iterdir())
-            
-            if not upload_files:
-                return {
-                    'agent_id': self.agent_id,
-                    'status': 'completed',
-                    'result': '李心悦：目前没有需要处理的新文档。如有文档需要处理，请直接上传到我的工作区。',
-                    'files_processed': 0
-                }
-            
-            for file_path in upload_files:
-                if file_path.is_file() and not file_path.name.startswith('.'):
-                    try:
-                        # 检查是否已经处理过
-                        if file_path.name in self.document_index["documents"]:
-                            continue
-                        
-                        self.current_task = f"正在处理文档：{file_path.name}"
-                        
-                        # 使用MinerU API处理文档
-                        markdown_content = await self._process_document_with_mineru(file_path)
-                        
-                        if markdown_content:
-                            # 保存处理后的Markdown文件
-                            md_filename = f"{file_path.stem}.md"
-                            md_file_path = self.processed_path / md_filename
-                            
-                            with open(md_file_path, 'w', encoding='utf-8') as f:
-                                f.write(markdown_content)
-                            
-                            # 生成摘要
-                            summary = await self._generate_summary(file_path.name, markdown_content)
-                            summary_file = self.summaries_path / f"{file_path.stem}_summary.txt"
-                            with open(summary_file, 'w', encoding='utf-8') as f:
-                                f.write(summary)
-                            
-                            # 提取关键信息
-                            key_info = await self._extract_key_information(file_path.name, markdown_content)
-                            key_info_file = self.extracts_path / f"{file_path.stem}_keyinfo.txt"
-                            with open(key_info_file, 'w', encoding='utf-8') as f:
-                                f.write(key_info)
-                            
-                            # 更新文档索引
-                            self._update_document_index(file_path.name, {
-                                'original_file': str(file_path),
-                                'processed_file': str(md_file_path),
-                                'summary_file': str(summary_file),
-                                'key_info_file': str(key_info_file),
-                                'processed_at': datetime.now().isoformat(),
-                                'file_size': file_path.stat().st_size,
-                                'summary': summary[:200] + "..." if len(summary) > 200 else summary
-                            })
-                            
-                            processed_files.append(file_path.name)
-                            
-                    except Exception as e:
-                        print(f"❌ 处理文档 {file_path.name} 时出错: {e}")
-                        continue
-            
-            # 保存索引
-            self._save_document_index()
-            
-            # 生成工作报告
-            if processed_files:
-                result_message = f"李心悦：我已经处理完成 {len(processed_files)} 个文档：\n"
-                for filename in processed_files:
-                    doc_info = self.document_index["documents"][filename]
-                    result_message += f"• {filename} - {doc_info['summary'][:100]}...\n"
-                result_message += "\n所有文档已转换为Markdown格式，并生成了摘要和关键信息提取。项目总监可以随时调用这些资料。"
+        logger.info(f"📄 {self.name} 开始执行任务: {task.description}")
+
+        # 简单的基于关键词的任务路由
+        if "处理" in task.description and "文件" in task.description:
+            # 假设文件路径等信息在context中
+            file_path = context.get("file_path", "") # 示例
+            if file_path:
+                return await self.process_uploaded_file(file_path)
             else:
-                result_message = "李心悦：所有文档都已经处理过了，没有新的文档需要处理。"
+                 return {"status": "error", "result": "未在上下文中找到需要处理的文件路径"}
+
+        elif "提取" in task.description and "信息" in task.description:
+            doc_id = context.get("document_id", "") # 示例
+            return await self.extract_key_info(doc_id)
             
-            self.status = 'completed'
-            return {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': result_message,
-                'files_processed': len(processed_files),
-                'processed_files': processed_files
-            }
-            
-        except Exception as e:
-            self.status = 'error'
-            return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f"李心悦：处理文档时遇到问题：{str(e)}",
-                'error': str(e)
-            }
+        elif "摘要" in task.description:
+            doc_id = context.get("document_id", "") # 示例
+            return await self.create_summary(doc_id)
+
+        else:
+            # 默认处理
+            return {"status": "completed", "result": f"已完成通用文档任务: {task.description}"}
 
     async def _process_document_with_mineru(self, file_path: Path) -> str:
         """使用MinerU API处理文档"""

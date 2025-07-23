@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
+import re # Added for regex in _execute_specific_task
 
 from metagpt.actions import Action
 from metagpt.schema import Message
@@ -160,30 +161,53 @@ class ChiefEditorAgent(BaseAgent):
             }
         }
     
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """执行具体的编辑任务"""
-        try:
-            task_type = task.get('type', 'review_content')
+        logger.info(f"👔 {self.name} 开始执行任务: {task.description}")
+
+        # 简单的基于关键词的任务路由
+        if "审核" in task.description or "校对" in task.description or "质量" in task.description:
+            # 假设需要审核的内容在上下文中
+            source_content = ""
+            if isinstance(context, dict):
+                for key, value in context.items():
+                    if isinstance(value, dict) and 'result' in value:
+                        res = value['result']
+                        if isinstance(res, dict) and 'content' in res: # 优先获取完整的content
+                            source_content = res['content']
+                            break
+                        elif isinstance(res, dict) and 'polished_content' in res: # 兼容润色后的内容
+                            source_content = res['polished_content']
+                            break
+
+            if not source_content:
+                return {"status": "error", "result": "未在上下文中找到可供审核的内容"}
             
-            if task_type == 'review_content':
-                return await self._review_content(task)
-            elif task_type == 'polish_content':
-                return await self._polish_content(task)
-            elif task_type == 'final_review':
-                return await self._final_review(task)
-            elif task_type == 'quality_check':
-                return await self._quality_check(task)
-            else:
-                return await self._review_content(task)  # 默认执行内容审核
-                
-        except Exception as e:
-            logger.error(f"❌ {self.name} 执行任务失败: {e}")
-            return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f'任务执行失败: {str(e)}',
-                'error': str(e)
-            }
+            review_type_match = re.search(r"进行(.*?)审核", task.description)
+            review_type = review_type_match.group(1).strip() if review_type_match else "全面"
+
+            return await self._review_content({"content": source_content, "review_type": review_type})
+
+        elif "润色" in task.description:
+            source_content = ""
+            if isinstance(context, dict):
+                for key, value in context.items():
+                     if isinstance(value, dict) and 'result' in value:
+                        res = value['result']
+                        if isinstance(res, dict) and 'content' in res:
+                            source_content = res['content']
+                            break
+            
+            if not source_content:
+                return {"status": "error", "result": "未在上下文中找到可供润色的内容"}
+
+            style_match = re.search(r"按照(.*?)风格", task.description)
+            style = style_match.group(1).strip() if style_match else "专业报告"
+            
+            return await self._polish_content({"content": source_content, "style": style})
+
+        else:
+            return {"status": "completed", "result": f"已完成通用编辑任务: {task.description}"}
 
     async def _review_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """审核内容"""
@@ -218,7 +242,7 @@ class ChiefEditorAgent(BaseAgent):
                 'status': 'completed',
                 'result': f"已完成{review_type}，提供了详细的修改建议",
                 'files_created': [review_file.name],
-                'review_summary': review_result[:300] + "..." if len(review_result) > 300 else review_result,
+                'review_summary': review_result, # 返回完整审核意见
                 'timestamp': datetime.now().isoformat()
             }
             

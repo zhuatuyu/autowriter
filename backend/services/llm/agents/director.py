@@ -1,287 +1,270 @@
 """
-智能项目总监Agent
-负责项目协调、需求分析和任务分配
+增强版智能项目总监Agent - 基于MetaGPT设计理念
+具备深度客户沟通、智能任务规划和动态Agent编排能力
 """
-import asyncio
-import yaml
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, List
-
-from metagpt.actions import Action
-from metagpt.schema import Message
+from metagpt.roles import Role
+from metagpt.schema import Message, Plan, Task
 from metagpt.logs import logger
+from metagpt.strategy.planner import Planner
+import json
+import os
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+from backend.services.llm.agents.base import BaseAgent
+from backend.models.plan import Plan, Task
+from metagpt.llm import LLM
+import re
 
-from .base import BaseAgent
-from backend.services.llm_provider import llm
 
-class ProjectPlanningAction(Action):
-    """项目规划动作"""
+class DirectorAgent(BaseAgent):
+    """
+    🎯 智能项目总监 - 虚拟办公室的核心管理者
     
-    async def run(self, user_requirements: str) -> str:
-        """生成项目规划"""
-        prompt = f"""
-基于用户需求生成详细的项目规划YAML模板：
-
-用户需求：
-{user_requirements}
-
-请生成包含以下结构的YAML：
-- report_title: 报告标题
-- report_type: 报告类型
-- chapters: 章节列表，每个章节包含title, description, experts, status
-
-只返回YAML内容，不要包含其他说明。
-"""
-        try:
-            response = await llm.acreate_text(prompt)
-            return response.strip().replace("```yaml", "").replace("```", "").strip()
-        except Exception as e:
-            logger.error(f"项目规划生成失败: {e}")
-            return ""
-
-
-class TaskCoordinationAction(Action):
-    """任务协调动作"""
+    新版职责:
+    1. 深度客户沟通，理解用户战略意图
+    2. 将用户需求转化为结构化的Plan和Tasks
+    3. 不负责具体执行，只负责规划"What"
+    """
     
-    async def run(self, task_info: Dict[str, Any]) -> Dict[str, Any]:
-        """协调任务分配"""
-        return {
-            'status': 'coordinated',
-            'assigned_agents': task_info.get('experts', []),
-            'priority': task_info.get('priority', 'normal')
-        }
-
-
-class IntelligentDirectorAgent(BaseAgent):
-    """智能项目总监Agent - 负责动态规划、协调和决策"""
-    
-    def __init__(self, session_id: str, workspace_path: str):
-        agent_id = 'director'
+    def __init__(self, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
-            agent_id=agent_id,
+            agent_id="director",
             session_id=session_id,
             workspace_path=workspace_path,
-            goal="协调AI团队完成高质量报告写作，确保项目顺利进行",
-            constraints="基于用户需求制定合理计划，确保任务分配得当"
+            memory_manager=memory_manager,
+            profile="智能项目总监",
+            goal="与客户深度沟通，制定项目行动计划"
         )
+        self.llm = LLM()
+        self.role = "项目管理和客户沟通专家"
+        self.agent_capabilities = self._initialize_capabilities()
+
+    def _initialize_capabilities(self):
+        """初始化Agent能力映射, 用于辅助LLM生成规划"""
+        return {
+            "document_expert": {
+                "name": "文档专家李心悦",
+                "responsibilities": ["处理用户上传的文档", "格式转换", "内容摘要", "文档检索", "从文档中提取信息", "管理历史文档"]
+            },
+            "case_expert": {
+                "name": "案例专家王磊", 
+                "responsibilities": ["根据主题搜索网络案例", "分析行业最佳实践", "提供外部参考资料"]
+            },
+            "data_analyst": {
+                "name": "数据分析师赵丽娅",
+                "responsibilities": ["从数据源提取数据", "进行统计分析", "生成数据图表", "计算和解读指标"]
+            },
+            "writer_expert": {
+                "name": "写作专家张翰",
+                "responsibilities": ["撰写报告的特定章节", "润色文本", "优化内容结构", "根据大纲创作内容"]
+            },
+            "chief_editor": {
+                "name": "总编辑钱敏",
+                "responsibilities": ["审核报告整体质量", "把控内容一致性", "校验格式规范", "进行最终定稿"]
+            },
+            "director": {
+                "name": "智能项目总监",
+                "responsibilities": ["回答用户关于项目管理、报告撰写技巧等专业问题", "提供咨询建议", "澄清用户需求"]
+            }
+        }
+    
+    async def process_request(self, user_message: str) -> Plan:
+        """
+        处理用户请求，生成一个行动计划 (Plan)
+        """
+        # 1. 记录用户消息
+        self._record_user_message(user_message)
+
+        # 2. 调用LLM生成规划
+        plan = await self._generate_plan(user_message)
         
-        # 设置profile（避免重复传递）
-        self.profile = "智能项目总监"
+        # 3. 记录自己的思考过程和规划
+        self._record_assistant_plan(plan)
         
-        # 设置总监信息
-        self.name = '智能项目总监'
-        self.avatar = '🎯'
-        self.expertise = "项目管理与协调"
-        
-        # 设置动作
-        self.set_actions([ProjectPlanningAction, TaskCoordinationAction])
-        
-        # 项目文件路径
-        self.template_path = self.agent_workspace / "dynamic_template.yaml"
-        self.draft_path = self.agent_workspace / "drafts"
-        self.draft_path.mkdir(exist_ok=True)
-        self.report_data = None
-        
-        logger.info(f"🎯 智能项目总监初始化完成")
+        return plan
 
-    def _get_system_prompt(self) -> str:
-        """动态构建系统提示词"""
-        return """
-你是AutoWriter Enhanced系统的智能项目总监，一个世界级的项目经理和需求分析师。
+    def _record_user_message(self, user_message: str):
+        """记录用户消息到统一记忆"""
+        if hasattr(self, '_memory_adapter') and self._memory_adapter:
+            self._memory_adapter.add_simple_message(content=user_message, role="user", cause_by="user_input")
 
-## 你的职责：
-1.  **主动沟通与需求挖掘**：你是与用户沟通的唯一接口。你必须主动、清晰地向用户提问，以完全理解他们的需求。不要满足于模糊的指令。
-2.  **动态规划 (MVP)**：基于用户需求，制定一个“最小可行”的报告框架（YAML格式）。这个框架应包含报告标题、类型和核心章节。
-3.  **层级化任务分解**：将每个章节分解为一系列具体的、可执行的子任务。每个子任务都必须明确指出需要哪位专家、需要什么输入、预期产出是什么。
-4.  **智能任务分配**：根据子任务的性质，精确地将其分配给最合适的专家（文档专家、案例专家等）。
-5.  **进度监控与质量把控**：持续跟踪任务进度，并在每个关键节点审核工作成果，确保最终报告的质量。
-6.  **持久化记忆**：你必须能够加载和理解项目历史（如旧的模板和产出），在现有工作的基础上继续推进。
-
-## 沟通风格：
-- 专业、主动、循循善诱。像一个真正的咨询顾问那样与用户对话。
-- 清晰明确地传达你的计划和下一步行动。
-"""
-
-    async def _generate_dynamic_template_prompt(self, user_message: str) -> str:
-        """为生成动态模板动态构建提示词"""
-        # 在未来，这里可以整合更多上下文信息，如历史对话、已知项目信息等
-        return f"""
-用户初步需求如下:
----
-{user_message}
----
-基于以上初步需求，请为一份绩效评价报告设计一个详细的YAML格式的写作大纲。
-这个大纲将作为我们与用户进一步讨论的基础。
-要求包含 report_title, report_type, 以及一个 chapters 列表。
-每个 chapter 需要有:
-- title: 章节标题
-- description: 对章节内容的简要描述
-- experts: 建议参与该章节的专家角色列表 (从 'document_expert', 'case_expert', 'data_analyst', 'writer_expert' 中选择)
-- status: 初始状态为 'pending'
-- draft_content: 初始为空字符串
-
-请只返回YAML内容，不要包含任何其他解释性文字或代码块标记。
-"""
-
-    async def _send_message(self, content: str, status: str, websocket_manager):
-        """通过WebSocket发送消息的辅助函数"""
-        if websocket_manager:
-            await websocket_manager.broadcast_agent_message(
-                session_id=self.session_id,
-                agent_type='intelligent_director',
-                agent_name=self.name,
-                content=content,
-                status=status
+    def _record_assistant_plan(self, plan: Plan):
+        """记录助手的规划到统一记忆"""
+        if hasattr(self, '_memory_adapter') and self._memory_adapter:
+            plan_summary = f"已为您的需求制定了计划：'{plan.goal}'，包含 {len(plan.tasks)} 个步骤。"
+            self._memory_adapter.add_simple_message(
+                content=plan_summary,
+                role=self.profile,
+                cause_by="assistant_planning"
             )
 
-    async def handle_request(self, user_message: str, team: dict, websocket_manager=None):
-        """处理用户请求的核心入口，包含完整的动态规划和执行流程"""
+    async def _generate_plan(self, user_message: str) -> Plan:
+        """
+        使用LLM将用户需求转化为结构化的Plan对象
+        """
+        context_summary = self._memory_adapter.get_conversation_history(limit=10)
+        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in context_summary])
+
+        prompt = f"""
+# 指令
+作为一名世界级的AI项目总监，你的任务是将用户的模糊需求，结合对话历史，转化为一个清晰、结构化的JSON格式的行动计划（Plan）。
+
+## 1. 上下文
+**对话历史:**
+{formatted_history}
+
+**最新用户需求:**
+{user_message}
+
+**可用专家能力:**
+{json.dumps(self.agent_capabilities, ensure_ascii=False, indent=2)}
+
+## 2. 你的任务
+你需要输出一个JSON对象，该对象遵循Plan和Task的数据模型。
+
+- `goal`: 必须是对用户核心目标的精准概括。
+- `tasks`: 一个有序的列表，每个task代表一个为实现goal所需执行的、不可再分的原子步骤。
+  - `description`: 必须清晰地描述这个任务“做什么”，语言应面向将要执行它的专家。
+  - `dependencies`: 如果一个任务需要等待其他任务完成，在这里列出其依赖的任务`id`。任务`id`应为`task_1`, `task_2`等，方便引用。
+
+## 3. 核心原则
+- **What, not How**: `description`只描述做什么，不操心怎么做或谁来做。
+- **原子性**: 每个Task都应该是最小的可执行单元。例如，不要创建“撰写报告”这种大任务，应拆分为“分析数据”、“撰写初稿”、“审核内容”等。
+- **逻辑性**: 任务列表必须逻辑有序。如果B任务依赖A任务的结果，B必须在A之后，并通过`dependencies`字段声明。
+- **全面性**: 计划需要覆盖从开始到结束的所有必要步骤，确保最终能完整地响应用户需求。
+- **简单任务处理**: 如果用户只是提问或咨询，计划可以只包含一个任务，如 `description: "回答用户关于写作技巧的问题"`。
+
+## 4. 输出格式
+你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
+
+```json
+{{
+  "goal": "用户的核心目标",
+  "tasks": [
+    {{
+      "id": "task_1",
+      "description": "第一个原子任务的清晰描述",
+      "dependencies": []
+    }},
+    {{
+      "id": "task_2",
+      "description": "第二个原子任务的清晰描述",
+      "dependencies": ["task_1"]
+    }}
+  ]
+}}
+```
+
+现在，请为用户的最新需求生成行动计划。
+"""
+        
+        response_json_str = await self.llm.aask(prompt)
+        
         try:
-            self.status = 'working'
-            await self._send_message("👋 您好！我是您的项目总监。正在分析您的需求...", "thinking", websocket_manager)
-
-            # 步骤 1: 生成动态模板
-            await self._generate_dynamic_template(user_message, websocket_manager)
-            
-            # 步骤 2: 加载模板并与用户确认
-            self.report_data = self._load_template()
-            template_overview = self._format_template_for_display(self.report_data)
-            await self._send_message(f"您的报告计划已生成：\n{template_overview}\n\n**如果满意，请回复“开始写作”**", "waiting_for_input", websocket_manager)
-            
-            # 此处简化流程，默认用户会同意。未来这里会等待用户的WebSocket消息。
-            # 实际场景下，如果用户回复“开始写作”，下面的流程才继续。
-
-        except Exception as e:
-            error_message = f"❌ 在规划阶段发生错误: {e}"
-            print(error_message)
-            self.status = 'error'
-            await self._send_message(error_message, "error", websocket_manager)
-
-    async def _generate_dynamic_template(self, user_message: str, websocket_manager):
-        """使用LLM生成动态YAML模板"""
-        await self._send_message("🧠 正在进行智能规划...", "working", websocket_manager)
-        prompt = await self._generate_dynamic_template_prompt(user_message)
-        response = await llm.acreate_text(prompt)
-        yaml_content = response.strip().replace("```yaml", "").replace("```", "").strip()
-        self.report_data = yaml.safe_load(yaml_content)
-        for i, chapter in enumerate(self.report_data.get('chapters', [])):
-            chapter['id'] = f"ch_{i+1:02d}"
-        self._save_template()
-        await self._send_message("✅ 动态报告模板已生成！", "completed", websocket_manager)
-
-    def _load_template(self):
-        """加载YAML模板"""
-        if self.template_path.exists():
-            with open(self.template_path, 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        return None
-
-    def _save_template(self):
-        """保存模板数据到YAML"""
-        if self.report_data:
-            with open(self.template_path, 'w', encoding='utf-8') as f:
-                yaml.dump(self.report_data, f, allow_unicode=True, sort_keys=False)
-
-    def _format_template_for_display(self, template_data: dict) -> str:
-        """格式化模板以便于展示"""
-        if not template_data: return "模板数据为空。"
-        title = template_data.get('report_title', '未知标题')
-        chapters = template_data.get('chapters', [])
-        display_text = f"**报告标题**: {title}\n\n**核心章节**:\n"
-        for i, ch in enumerate(chapters):
-            experts = ", ".join(ch.get('experts', []))
-            display_text += f"  - **第{i+1}章: {ch['title']}** (需: {experts})\n"
-        return display_text
-    
-    async def get_work_summary(self) -> str:
-        """获取工作摘要"""
-        try:
-            summary = f"🎯 {self.name} 工作摘要:\n"
-            
-            if self.report_data:
-                title = self.report_data.get('report_title', '未知项目')
-                chapters = len(self.report_data.get('chapters', []))
-                summary += f"• 当前项目: {title}\n"
-                summary += f"• 规划章节: {chapters} 个\n"
+            # 提取```json ... ```块中的内容
+            match = re.search(r"```json\s*([\s\S]*?)\s*```", response_json_str)
+            if match:
+                json_str = match.group(1)
             else:
-                summary += f"• 当前项目: 暂无活跃项目\n"
-            
-            summary += f"• 当前状态: {self.status}\n"
-            
-            if self.current_task:
-                summary += f"• 当前任务: {self.current_task}\n"
-            
-            return summary
-            
-        except Exception as e:
-            return f"🎯 {self.name}: 工作摘要获取失败 - {str(e)}"
+                json_str = response_json_str
 
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
-        """执行具体的项目管理任务"""
+            plan_dict = json.loads(json_str)
+            
+            # 使用Pydantic模型进行验证和转换
+            plan = Plan(
+                goal=plan_dict.get("goal", user_message),
+                tasks=[Task(**task_data) for task_data in plan_dict.get("tasks", [])]
+            )
+            return plan
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"无法解析LLM返回的Plan JSON: {e}\n原始返回: {response_json_str}")
+            # 创建一个回退计划
+            return Plan(
+                goal=f"处理用户请求: {user_message}",
+                tasks=[Task(id="task_1", description=f"直接回应用户关于'{user_message}'的请求")]
+            )
+
+    def _get_timestamp(self) -> str:
+        """获取时间戳"""
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    async def revise_plan(self, original_plan: Plan, user_feedback: str) -> Plan:
+        """
+        根据用户的反馈修订计划
+        """
+        logger.info(f"🎯 根据用户反馈修订计划: {user_feedback}")
+        context_summary = self._memory_adapter.get_conversation_history(limit=10)
+        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in context_summary])
+
+        prompt = f"""
+# 指令
+作为一名世界级的AI项目总监，你的任务是根据用户的反馈，修订一个已有的行动计划。
+
+## 1. 上下文
+**对话历史:**
+{formatted_history}
+
+**原始计划:**
+```json
+{original_plan.model_dump_json(indent=2)}
+```
+
+**用户最新反馈/修改意见:**
+{user_feedback}
+
+**可用专家能力:**
+{json.dumps(self.agent_capabilities, ensure_ascii=False, indent=2)}
+
+## 2. 你的任务
+你需要输出一个**全新的、修订后的**JSON格式的行动计划（Plan）。
+
+- **整合反馈**: 新计划必须充分整合用户的修改意见。例如，如果用户要求“在第2步之前增加一个数据清洗步骤”，你就必须添加这个新任务并调整后续任务的依赖关系。
+- **重新思考**: 不要只做简单的增删。要像一个真正的项目总监一样，思考用户的反馈对整个计划的逻辑和流程意味着什么，并进行系统性的优化。
+- **保持原则**: 同样要遵循 **What, not How**、**原子性**、**逻辑性** 和 **全面性** 的原则。
+
+## 3. 输出格式
+你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
+
+```json
+{{
+  "goal": "（可能是修订后的）用户核心目标",
+  "tasks": [
+    {{
+      "id": "task_1",
+      "description": "第一个原子任务的清晰描述",
+      "dependencies": []
+    }},
+    {{
+      "id": "task_2",
+      "description": "第二个原子任务的清晰描述",
+      "dependencies": ["task_1"]
+    }}
+  ]
+}}
+```
+
+现在，请生成修订后的行动计划。
+"""
+        
+        response_json_str = await self.llm.aask(prompt)
+        
         try:
-            task_type = task.get('type', 'handle_request')
-            
-            if task_type == 'handle_request':
-                return await self._handle_user_request(task)
-            elif task_type == 'generate_plan':
-                return await self._generate_project_plan(task)
-            elif task_type == 'coordinate_team':
-                return await self._coordinate_team_tasks(task)
+            match = re.search(r"```json\s*([\s\S]*?)\s*```", response_json_str)
+            if match:
+                json_str = match.group(1)
             else:
-                return await self._handle_user_request(task)
-                
-        except Exception as e:
-            logger.error(f"❌ {self.name} 执行任务失败: {e}")
-            return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f'任务执行失败: {str(e)}',
-                'error': str(e)
-            }
+                json_str = response_json_str
 
-    async def _handle_user_request(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """处理用户请求"""
-        try:
-            user_message = task.get('message', '')
-            self.current_task = f"处理用户需求: {user_message[:50]}..."
+            plan_dict = json.loads(json_str)
             
-            # 生成项目规划
-            planning_action = ProjectPlanningAction()
-            yaml_content = await planning_action.run(user_message)
-            
-            if yaml_content:
-                self.report_data = yaml.safe_load(yaml_content)
-                self._save_template()
-                
-                result = {
-                    'agent_id': self.agent_id,
-                    'status': 'completed',
-                    'result': f"已为您生成项目规划：{self.report_data.get('report_title', '报告')}",
-                    'project_plan': self.report_data,
-                    'template_file': str(self.template_path),
-                    'timestamp': datetime.now().isoformat()
-                }
-            else:
-                result = {
-                    'agent_id': self.agent_id,
-                    'status': 'error',
-                    'result': "项目规划生成失败",
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-            return result
-            
-        except Exception as e:
-            logger.error(f"❌ {self.name} 处理用户请求失败: {e}")
-            return {'status': 'error', 'result': str(e)}
-
-    async def _generate_project_plan(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """生成项目计划的专用任务"""
-        return await self._handle_user_request(task)
-
-    async def _coordinate_team_tasks(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """协调团队任务"""
-        # 在这里实现任务协调逻辑
-        return {'status': 'completed', 'result': '团队任务已协调'}
-   
+            plan = Plan(
+                goal=plan_dict.get("goal", original_plan.goal),
+                tasks=[Task(**task_data) for task_data in plan_dict.get("tasks", [])]
+            )
+            # 记录修订后的计划
+            self._record_assistant_plan(plan)
+            return plan
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"无法解析LLM返回的修订版Plan JSON: {e}\n原始返回: {response_json_str}")
+            # 如果修订失败，返回原始计划
+            return original_plan

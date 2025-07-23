@@ -82,27 +82,46 @@ class CaseExpertAgent(BaseAgent):
         
         logger.info(f"🔍 案例专家 {self.name} 初始化完成")
 
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
-        """执行具体的案例搜索任务"""
+
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行具体的案例研究任务
+        task.description 会包含需要研究的主题或关键词
+        """
+        logger.info(f"🔍 {self.name} 开始执行任务: {task.description}")
+
+        # 从任务描述中提取查询关键词 (简化处理)
+        # 实际应用中可能需要更智能的实体提取
+        query = task.description.replace("研究", "").replace("搜索", "").replace("案例", "").strip()
+
         try:
-            task_type = task.get('type', 'search_cases')
+            # 使用阿里巴巴搜索工具
+            search_results = await self.search_tool.search(query)
             
-            if task_type == 'search_cases':
-                return await self._search_cases(task)
-            elif task_type == 'analyze_cases':
-                return await self._analyze_cases(task)
-            elif task_type == 'compile_best_practices':
-                return await self._compile_best_practices(task)
-            else:
-                return await self._search_cases(task)  # 默认执行案例搜索
-                
-        except Exception as e:
-            logger.error(f"❌ {self.name} 执行任务失败: {e}")
+            if not search_results:
+                return {
+                    "status": "completed",
+                    "result": f"关于 '{query}' 的案例研究未找到相关结果。"
+                }
+
+            # 格式化结果
+            formatted_result = {
+                "query": query,
+                "count": len(search_results),
+                "summary": f"找到了 {len(search_results)} 条关于 '{query}' 的相关案例。",
+                "results": search_results
+            }
+            
             return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f'任务执行失败: {str(e)}',
-                'error': str(e)
+                "status": "completed",
+                "result": formatted_result
+            }
+        except Exception as e:
+            error_msg = f"❌ 执行案例研究时出错: {e}"
+            logger.error(error_msg)
+            return {
+                "status": "error",
+                "result": error_msg
             }
 
     async def _search_cases(self, task: Dict[str, Any]) -> Dict[str, Any]:

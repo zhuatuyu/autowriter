@@ -287,25 +287,25 @@ class BaseAgent(Role):
             self.status = 'error'
             return False
     
-    async def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """执行任务的通用方法"""
         try:
             self.status = 'working'
-            self.current_task = task.get('description', '执行任务')
+            self.current_task = task.description
             self.progress = 0
             
             # 保存状态
             self._save_workspace_state()
             
-            # 获取历史上下文
-            context = self.get_work_context()
+            # 再次确认并移除此错误行：它会用字符串覆盖从Planner传来的结构化context字典
+            # context = self.get_work_context() 
             
             # 执行具体任务（子类重写）
             result = await self._execute_specific_task(task, context)
             
             # 记录工作记忆
             self.record_work_memory(
-                task.get('description', '未知任务'),
+                task.description,
                 result.get('result', '任务完成')
             )
             
@@ -327,12 +327,12 @@ class BaseAgent(Role):
                 'error': str(e)
             }
     
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """执行具体任务，子类需要重写此方法"""
         return {
             'agent_id': self.agent_id,
             'status': 'completed',
-            'result': f'{self.name} 已完成任务: {task.get("description", "未知任务")}',
+            'result': f'{self.name} 已完成任务: {task.description}',
         }
     
     def get_team_context(self) -> Dict[str, Any]:

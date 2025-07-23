@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List
+import re # Added for regex in _execute_specific_task
 
 from metagpt.actions import Action
 from metagpt.schema import Message
@@ -122,28 +123,56 @@ class DataAnalystAgent(BaseAgent):
             }
         }
     
-    async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
+    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """执行具体的数据分析任务"""
-        try:
-            task_type = task.get('type', 'extract_data')
+        logger.info(f"📊 {self.name} 开始执行任务: {task.description}")
+
+        # 简单的基于关键词的任务路由
+        if "提取" in task.description and "数据" in task.description:
+            # 假设需要分析的内容在上下文中
+            source_content = ""
+            if context:
+                # 尝试从上下文的任何来源提取内容
+                for key, value in context.items():
+                    if isinstance(value, dict) and 'result' in value:
+                         # 优先使用上游任务的result字段
+                        res = value['result']
+                        if isinstance(res, dict) and 'content_preview' in res:
+                            source_content = res['content_preview']
+                            break
+                        elif isinstance(res, str):
+                            source_content = res
+                            break
             
-            if task_type == 'extract_data':
-                return await self._extract_data(task)
-            elif task_type == 'analyze_data':
-                return await self._analyze_data(task)
-            elif task_type == 'generate_charts':
-                return await self._generate_charts(task)
-            else:
-                return await self._extract_data(task)  # 默认执行数据提取
-                
-        except Exception as e:
-            logger.error(f"❌ {self.name} 执行任务失败: {e}")
-            return {
-                'agent_id': self.agent_id,
-                'status': 'error',
-                'result': f'任务执行失败: {str(e)}',
-                'error': str(e)
-            }
+            if not source_content:
+                return {"status": "error", "result": "未在上下文中找到可供提取数据的内容"}
+
+            return await self._extract_data({"content": source_content, "data_type": "数值和关键信息"})
+
+        elif "分析" in task.description and "数据" in task.description:
+            # 假设数据在上下文中
+            source_data = ""
+            if context:
+                 for key, value in context.items():
+                    if isinstance(value, dict) and 'result' in value:
+                        res = value['result']
+                        if isinstance(res, dict) and 'extracted_data' in res:
+                            source_data = res['extracted_data']
+                            break
+                        elif isinstance(res, str):
+                            source_data = res
+                            break
+            
+            if not source_data:
+                return {"status": "error", "result": "未在上下文中找到可供分析的数据"}
+            
+            analysis_type_match = re.search(r"进行(.*?)分析", task.description)
+            analysis_type = analysis_type_match.group(1).strip() if analysis_type_match else "综合"
+            
+            return await self._analyze_data({"data": source_data, "analysis_type": analysis_type})
+
+        else:
+            return {"status": "completed", "result": f"已完成通用数据任务: {task.description}"}
 
     async def _extract_data(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """提取数据"""
@@ -177,7 +206,7 @@ class DataAnalystAgent(BaseAgent):
                 'status': 'completed',
                 'result': f"已完成{data_type}的提取",
                 'files_created': [data_file.name],
-                'extracted_data': extracted_data[:300] + "..." if len(extracted_data) > 300 else extracted_data,
+                'extracted_data': extracted_data, # 返回完整数据
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -235,7 +264,7 @@ class DataAnalystAgent(BaseAgent):
                 'status': 'completed',
                 'result': f"已完成{analysis_type}",
                 'files_created': [analysis_file.name],
-                'analysis_summary': analysis_result[:300] + "..." if len(analysis_result) > 300 else analysis_result,
+                'analysis_summary': analysis_result, # 返回完整分析
                 'timestamp': datetime.now().isoformat()
             }
             

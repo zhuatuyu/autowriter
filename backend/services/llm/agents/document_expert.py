@@ -67,14 +67,14 @@ class DocumentExpertAgent(BaseAgent):
     - 为其他同事提供格式化的文档内容
     """
 
-    def __init__(self, agent_id: str, session_id: str, workspace_path: str):
+    def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
             agent_id=agent_id,
             session_id=session_id,
             workspace_path=workspace_path,
+            memory_manager=memory_manager,
             profile="文档专家",
-            goal="管理和处理所有项目文档，提供格式化和摘要服务",
-            constraints="确保文档处理的准确性和完整性，维护良好的文档索引"
+            goal="高效管理、处理和分析所有项目相关文档"
         )
         
         # 设置专家信息

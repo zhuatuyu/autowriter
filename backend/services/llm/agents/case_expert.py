@@ -1,6 +1,6 @@
 """
-案例专家Agent - 王磊
-负责搜索相关案例和最佳实践
+🔍 案例专家（王磊） - 虚拟办公室的研究员
+负责搜索相关案例和最佳实践，为报告提供参考依据
 """
 import asyncio
 import json
@@ -12,8 +12,8 @@ from metagpt.actions import Action
 from metagpt.schema import Message
 from metagpt.logs import logger
 
-from .base import BaseAgent
-from backend.tools.alibaba_search import alibaba_search_tool
+from backend.services.llm.agents.base import BaseAgent
+from backend.tools.alibaba_search import AlibabaSearchTool
 
 
 class CaseSearchAction(Action):
@@ -23,7 +23,7 @@ class CaseSearchAction(Action):
         """执行案例搜索"""
         try:
             # 使用阿里巴巴搜索工具
-            search_results = await alibaba_search_tool.run(query)
+            search_results = await self.search_tool.search(query)
             return search_results
         except Exception as e:
             logger.error(f"案例搜索失败: {e}")
@@ -50,17 +50,21 @@ class CaseAnalysisAction(Action):
 
 
 class CaseExpertAgent(BaseAgent):
-    """案例专家Agent - 王磊 🔍"""
-
-    def __init__(self, agent_id: str, session_id: str, workspace_path: str):
+    """
+    🔍 案例专家（王磊） - 虚拟办公室的研究员
+    """
+    def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
             agent_id=agent_id,
-            session_id=session_id, 
+            session_id=session_id,
             workspace_path=workspace_path,
+            memory_manager=memory_manager,
             profile="案例专家",
-            goal="搜索和分析相关案例，为报告提供参考依据",
-            constraints="确保案例的真实性和相关性，提供有价值的参考信息"
+            goal="搜索、分析和提供与项目相关的案例与最佳实践"
         )
+        
+        # 初始化案例搜索工具
+        self.search_tool = AlibabaSearchTool()
         
         # 设置专家信息
         self.name = "王磊"

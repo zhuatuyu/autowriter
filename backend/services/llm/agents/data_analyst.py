@@ -71,17 +71,21 @@ class DataAnalysisAction(Action):
 
 
 class DataAnalystAgent(BaseAgent):
-    """数据分析师Agent - 赵丽娅 📊"""
-
-    def __init__(self, agent_id: str, session_id: str, workspace_path: str):
+    """
+    📊 数据分析师（赵丽娅） - 虚拟办公室的数据专家
+    """
+    def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
             agent_id=agent_id,
             session_id=session_id,
             workspace_path=workspace_path,
+            memory_manager=memory_manager,
             profile="数据分析师",
-            goal="提取和分析项目相关数据，提供数据洞察和可视化支持",
-            constraints="确保数据分析的准确性和客观性，提供有价值的数据洞察"
+            goal="进行数据收集、统计分析和可视化"
         )
+        
+        # 初始化数据分析工具
+        self.analysis_tools = self._initialize_analysis_tools()
         
         # 设置专家信息
         self.name = "赵丽娅"
@@ -100,7 +104,24 @@ class DataAnalystAgent(BaseAgent):
             dir_path.mkdir(exist_ok=True)
         
         logger.info(f"📊 数据分析师 {self.name} 初始化完成")
-
+    
+    def _initialize_analysis_tools(self) -> Dict[str, Any]:
+        """初始化数据分析工具"""
+        return {
+            "statistical_analysis": {
+                "description": "基础统计分析工具",
+                "capabilities": ["均值计算", "标准差", "相关性分析", "趋势分析"]
+            },
+            "data_visualization": {
+                "description": "数据可视化工具", 
+                "capabilities": ["图表生成", "数据展示", "报告美化"]
+            },
+            "performance_metrics": {
+                "description": "绩效指标分析工具",
+                "capabilities": ["KPI分析", "目标达成率", "效率评估"]
+            }
+        }
+    
     async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
         """执行具体的数据分析任务"""
         try:

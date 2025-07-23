@@ -68,17 +68,21 @@ class ContentReviewAction(Action):
 
 
 class WriterExpertAgent(BaseAgent):
-    """写作专家Agent"""
-
-    def __init__(self, agent_id: str, session_id: str, workspace_path: str):
+    """
+    ✍️ 写作专家（张翰） - 虚拟办公室的内容创作者
+    """
+    def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
             agent_id=agent_id,
             session_id=session_id,
             workspace_path=workspace_path,
+            memory_manager=memory_manager,
             profile="写作专家",
-            goal="撰写高质量的报告内容，确保文字流畅、逻辑清晰",
-            constraints="遵循专业写作标准，确保内容准确性和可读性"
+            goal="撰写高质量、结构清晰的报告内容"
         )
+        
+        # 初始化写作工具和模板
+        self.writing_templates = self._load_writing_templates()
         
         # 设置专家信息
         self.name = "张翰"
@@ -95,7 +99,63 @@ class WriterExpertAgent(BaseAgent):
         self.reviews_dir.mkdir(exist_ok=True)
         
         logger.info(f"✍️ 写作专家 {self.name} 初始化完成")
+    
+    def _load_writing_templates(self) -> Dict[str, str]:
+        """加载写作模板"""
+        return {
+            "executive_summary": """
+# 执行摘要
 
+## 项目概述
+{project_overview}
+
+## 主要成果
+{key_achievements}
+
+## 关键指标
+{key_metrics}
+
+## 结论与建议
+{conclusions}
+""",
+            "introduction": """
+# 引言
+
+## 背景
+{background}
+
+## 目标
+{objectives}
+
+## 方法
+{methodology}
+""",
+            "analysis": """
+# 分析章节
+
+## 数据概述
+{data_overview}
+
+## 关键发现
+{key_findings}
+
+## 趋势分析
+{trend_analysis}
+""",
+            "conclusion": """
+# 结论
+
+## 主要成果
+{main_results}
+
+## 经验总结
+{lessons_learned}
+
+## 未来展望
+{future_outlook}
+"""
+        }
+    
     async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
         """执行具体的写作任务"""
         try:

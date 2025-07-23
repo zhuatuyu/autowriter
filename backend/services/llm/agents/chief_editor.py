@@ -100,17 +100,21 @@ class QualityAssuranceAction(Action):
 
 
 class ChiefEditorAgent(BaseAgent):
-    """总编辑Agent - 钱敏 👔"""
-
-    def __init__(self, agent_id: str, session_id: str, workspace_path: str):
+    """
+    👔 总编辑（钱敏） - 虚拟办公室的质量把关专家
+    """
+    def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
             agent_id=agent_id,
             session_id=session_id,
             workspace_path=workspace_path,
+            memory_manager=memory_manager,
             profile="总编辑",
-            goal="确保报告的最终质量，进行专业审核和润色",
-            constraints="严格把控质量标准，确保内容的准确性和专业性"
+            goal="进行最终审核、润色和质量把控"
         )
+        
+        # 初始化编辑工具和标准
+        self.editing_standards = self._load_editing_standards()
         
         # 设置专家信息
         self.name = "钱敏"
@@ -129,7 +133,33 @@ class ChiefEditorAgent(BaseAgent):
             dir_path.mkdir(exist_ok=True)
         
         logger.info(f"👔 总编辑 {self.name} 初始化完成")
-
+    
+    def _load_editing_standards(self) -> Dict[str, Any]:
+        """加载编辑标准"""
+        return {
+            "content_quality": {
+                "description": "内容质量标准",
+                "criteria": ["准确性", "完整性", "逻辑性", "专业性"]
+            },
+            "format_standards": {
+                "description": "格式规范标准",
+                "criteria": ["标题层级", "段落结构", "引用格式", "图表编号"]
+            },
+            "language_standards": {
+                "description": "语言表达标准", 
+                "criteria": ["用词准确", "表达清晰", "语法规范", "风格统一"]
+            },
+            "review_checklist": {
+                "description": "审核检查清单",
+                "items": [
+                    "内容是否准确无误",
+                    "逻辑是否清晰连贯", 
+                    "格式是否规范统一",
+                    "语言是否专业得体"
+                ]
+            }
+        }
+    
     async def _execute_specific_task(self, task: Dict[str, Any], context: str) -> Dict[str, Any]:
         """执行具体的编辑任务"""
         try:

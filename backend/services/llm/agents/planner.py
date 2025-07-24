@@ -30,40 +30,14 @@ class PlannerAgent(BaseAgent):
             goal="高效、准确地执行计划，协调团队完成任务"
         )
         self.role = "项目经理"
-        self.expert_map = self._initialize_expert_map()
+        # self.expert_map = self._initialize_expert_map() # 弃用基于关键词的路由
 
     def _initialize_expert_map(self) -> Dict[str, str]:
         """
-        初始化任务描述关键词到专家AgentID的映射。
-        这是一种简化的智能路由机制。
+        (已弃用) 初始化任务描述关键词到专家AgentID的映射。
+        现在Planner将严格按照Director在Plan中指定的agent_id来分配任务。
         """
-        return {
-            "文档": "document_expert",
-            "文件": "document_expert",
-            "上传": "document_expert",
-            "格式": "document_expert",
-            "提取": "document_expert",
-            "案例": "case_expert",
-            "研究": "case_expert",
-            "搜索": "case_expert",
-            "参考": "case_expert",
-            "数据": "data_analyst",
-            "分析": "data_analyst",
-            "统计": "data_analyst",
-            "指标": "data_analyst",
-            "图表": "data_analyst",
-            "撰写": "writer_expert",
-            "写作": "writer_expert",
-            "润色": "writer_expert",
-            "章节": "writer_expert",
-            "审核": "chief_editor",
-            "校对": "chief_editor",
-            "质量": "chief_editor",
-            "定稿": "chief_editor",
-            "回答": "director", # 简单咨询由Director自己回答
-            "咨询": "director",
-            "建议": "director"
-        }
+        return {}
 
     async def execute_plan(self, plan: Plan, expert_team: Dict[str, BaseAgent]) -> Dict[str, Any]:
         """
@@ -81,11 +55,11 @@ class PlannerAgent(BaseAgent):
 
             next_task.status = "in_progress"
             
-            # 智能分配任务给专家
+            # 严格按照Plan中指定的Agent进行分配
             expert_agent = self._assign_task_to_expert(next_task, expert_team)
 
             if not expert_agent:
-                error_msg = f"❌ 无法为任务 '{next_task.description}'找到合适的专家。"
+                error_msg = f"❌ 无法为任务 '{next_task.description}' 找到指定的专家 '{next_task.agent}'。"
                 logger.error(error_msg)
                 next_task.status = "error"
                 next_task.result = error_msg
@@ -130,16 +104,17 @@ class PlannerAgent(BaseAgent):
         return self._summarize_plan_result(plan)
 
     def _assign_task_to_expert(self, task: Task, expert_team: Dict[str, BaseAgent]) -> BaseAgent:
-        """根据任务描述，找到最合适的专家"""
-        # 这是一个简化的实现，通过关键词匹配
-        for keyword, agent_id in self.expert_map.items():
-            if keyword in task.description:
-                task.owner_agent_id = agent_id
-                return expert_team.get(agent_id)
+        """严格根据任务中指定的agent_id来分配专家"""
+        # 新逻辑：直接使用task中由Director指定的agent_id
+        # 安全校验：检查Task对象是否有agent属性
+        if not hasattr(task, 'agent') or not task.agent:
+            logger.error(f"任务 '{task.description}' 未指定负责的agent或agent字段为空。")
+            return None
+
+        agent_id = task.agent
         
-        # 如果没有关键词匹配，默认分配给写作专家处理
-        task.owner_agent_id = "writer_expert"
-        return expert_team.get("writer_expert")
+        task.owner_agent_id = agent_id # 记录执行者
+        return expert_team.get(agent_id)
         
     def _gather_context_for_task(self, plan: Plan, current_task: Task) -> Dict[str, Any]:
         """为当前任务收集其依赖任务的结果作为上下文"""

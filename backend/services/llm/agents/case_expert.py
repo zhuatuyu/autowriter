@@ -14,6 +14,8 @@ from metagpt.logs import logger
 
 from backend.services.llm.agents.base import BaseAgent
 from backend.tools.alibaba_search import AlibabaSearchTool
+# 导入新的摘要工具
+from backend.tools.summary_tool import summary_tool
 
 # 导入新的Prompt模块
 from backend.services.llm.prompts import case_expert_prompts
@@ -94,11 +96,12 @@ class CaseExpertAgent(BaseAgent):
         logger.info(f"🔍 {self.name} 开始执行任务: {task.description}")
 
         # 从任务描述中提取查询关键词 (简化处理)
-        query = task.description.replace("研究", "").replace("搜索", "").replace("案例", "").strip()
+        # 移除了不必要的词语，更直接地使用任务描述作为查询核心
+        query = task.description.replace("研究", "").replace("搜索", "").replace("案例", "").replace("关于", "").replace("和相关", "").strip()
 
         try:
-            # 统一调用旧的、带文件保存的搜索逻辑
-            search_task_payload = {"keywords": query.split(), "domain": "综合领域"}
+            # 统一调用搜索逻辑，但现在 _search_cases 只会执行一次精确搜索
+            search_task_payload = {"query": query}
             search_result_dict = await self._search_cases(search_task_payload)
 
             # 检查执行状态
@@ -124,74 +127,56 @@ class CaseExpertAgent(BaseAgent):
             return {"status": "error", "result": error_msg}
 
     async def _search_cases(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """搜索相关案例"""
+        """
+        根据给定的精确查询，执行单次网络搜索并保存结果。
+        不再进行自作聪明的二次查询扩展。
+        """
         try:
-            keywords = task.get('keywords', ['绩效评价', '案例'])
-            domain = task.get('domain', '政府绩效')
+            query = task.get('query')
+            if not query:
+                raise ValueError("搜索任务必须包含'query'字段")
             
-            self.current_task = f"正在搜索 {domain} 相关案例"
+            self.current_task = f"正在搜索: {query}"
             self.progress = 10
             
-            # 构建搜索查询
-            queries = [
-                f"{domain} 成功案例",
-                f"{' '.join(keywords)} 最佳实践",
-                f"{domain} 实施经验",
-                f"{' '.join(keywords)} 典型做法"
-            ]
+            logger.info(f"🔍 {self.name} 正在执行精确搜索: {query}")
             
-            all_results = []
-            files_created = []
+            # 执行单次精确搜索
+            search_results_text = await self.search_tool.run(query)
+            self.progress = 80
+
+            # 保存单次搜索结果
+            # 文件名使用查询内容，并进行安全处理
+            safe_query_filename = "".join(c if c.isalnum() else '_' for c in query)[:50]
+            result_file = self.searches_dir / f"search_{safe_query_filename}_{datetime.now().strftime('%H%M%S')}.md"
             
-            for i, query in enumerate(queries):
-                self.progress = 20 + (i * 20)
-                logger.info(f"🔍 {self.name} 搜索: {query}")
-                
-                # 执行搜索 - 直接使用Agent自己的工具，不再创建临时的Action实例
-                search_results = await self.search_tool.run(query)
-                
-                # 保存搜索结果
-                result_file = self.searches_dir / f"search_{query.replace(' ', '_')}_{datetime.now().strftime('%H%M%S')}.md"
-                with open(result_file, 'w', encoding='utf-8') as f:
-                    f.write(f"# 搜索结果: {query}\n\n")
-                    f.write(f"**搜索时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                    f.write(f"**搜索内容**:\n\n{search_results}\n\n")
-                    f.write(f"---\n*搜索执行: {self.name}*")
-                
-                all_results.append({
-                    'query': query,
-                    'results': search_results,
-                    'file': result_file.name
-                })
-                files_created.append(result_file.name)
-                
-                await asyncio.sleep(0.5)  # 避免请求过快
+            with open(result_file, 'w', encoding='utf-8') as f:
+                f.write(f"# 搜索结果: {query}\n\n")
+                f.write(f"**搜索时间**: {datetime.now().strftime('%Y-%m-%d %H:%M%S')}\n\n")
+                f.write(f"**搜索内容**:\n\n{search_results_text}\n\n")
+                f.write(f"---\n*搜索执行: {self.name}*")
             
-            # 生成搜索摘要
-            self.progress = 90
-            summary = await self._generate_search_summary(all_results)
+            files_created = [result_file.name]
             
-            summary_file = self.cases_dir / f"search_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(summary_file, 'w', encoding='utf-8') as f:
-                f.write(summary)
-            files_created.append(summary_file.name)
+            # (可选) 如果未来需要，可以在这里调用SummaryTool对单次结果做个快速摘要
+            # summary = await summary_tool.run(search_results_text)
             
             self.progress = 100
             
             result = {
                 'agent_id': self.agent_id,
                 'status': 'completed',
-                'result': f"已完成 {domain} 相关案例搜索，共搜索 {len(queries)} 个关键词，生成 {len(files_created)} 个文件",
+                'result': f"已完成对 '{query}' 的搜索，结果已保存。",
                 'files_created': files_created,
-                'search_queries': queries,
-                'summary': summary, # 返回完整的摘要内容
+                'search_query': query,
+                'content': search_results_text, # 将原始搜索结果内容也返回，便于后续任务直接使用
                 'timestamp': datetime.now().isoformat()
             }
             
             return result
             
         except Exception as e:
-            logger.error(f"❌ {self.name} 案例搜索失败: {e}")
+            logger.error(f"❌ {self.name} 案例搜索失败: {e}", exc_info=True)
             return {
                 'agent_id': self.agent_id,
                 'status': 'error',
@@ -304,41 +289,11 @@ class CaseExpertAgent(BaseAgent):
         except Exception as e:
             logger.error(f"❌ {self.name} 最佳实践整理失败: {e}")
             raise
-
-    async def _generate_search_summary(self, search_results: List[Dict]) -> str:
-        """生成搜索结果摘要"""
-        # 使用新的Prompt模块
-        prompt = case_expert_prompts.get_search_summary_prompt(search_results, self.name)
-        
-        try:
-            # 这里需要调用LLM，但CaseExpertAgent没有直接的LLM实例
-            # 暂时使用简单的文本生成
-            summary = f"# 案例搜索摘要报告\n\n"
-            summary += f"**搜索专家**: {self.name}\n"
-            summary += f"**搜索时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            summary += f"**搜索查询数**: {len(search_results)}\n\n"
-            
-            summary += "## 搜索概览\n\n"
-            for i, result in enumerate(search_results, 1):
-                summary += f"{i}. **{result['query']}**\n"
-                summary += f"   - 结果文件: {result['file']}\n"
-                summary += f"   - 内容预览: {result['results'][:100]}...\n\n"
-            
-            summary += "## 主要发现\n\n"
-            summary += "- 收集了多个相关案例和最佳实践\n"
-            summary += "- 涵盖了不同领域的实施经验\n"
-            summary += "- 为报告撰写提供了丰富的参考资料\n\n"
-            
-            summary += "## 后续建议\n\n"
-            summary += "1. 对搜索结果进行深入分析\n"
-            summary += "2. 提取关键成功因素\n"
-            summary += "3. 整理可借鉴的经验做法\n"
-            summary += "4. 为报告撰写提供案例支撑\n\n"
-            
-            return summary
-        except Exception as e:
-            logger.error(f"生成搜索摘要失败: {e}")
-            return f"搜索摘要生成失败: {str(e)}"
+    
+    # _generate_search_summary 方法可以暂时移除或注释，因为总结任务将由Director明确下发
+    # 并在新的、专门的总结任务中调用summary_tool
+    # async def _generate_search_summary(self, search_results: List[Dict]) -> str:
+    #    ...
 
     async def get_work_summary(self) -> str:
         """获取工作摘要"""

@@ -16,6 +16,8 @@ from metagpt.logs import logger
 from .base import BaseAgent
 from backend.services.llm_provider import llm
 from backend.tools.mineru_api_tool import mineru_tool
+# 导入新的摘要工具
+from backend.tools.summary_tool import summary_tool
 
 # 导入新的Prompt模块
 from backend.services.llm.prompts import document_expert_prompts
@@ -144,7 +146,21 @@ class DocumentExpertAgent(BaseAgent):
 
         elif "提取" in task.description and "信息" in task.description:
             doc_id = context.get("document_id", "") # 示例
-            return await self.extract_key_info(doc_id)
+            if not doc_id:
+                 # 尝试从上下文中获取文件名
+                 if context:
+                     for key, value in context.items():
+                         if isinstance(value, dict) and 'result' in value:
+                             res = value['result']
+                             if isinstance(res, dict) and 'files_created' in res and res['files_created']:
+                                 # 假设使用第一个创建的文件
+                                 doc_id = res['files_created'][0]
+                                 break
+            
+            if not doc_id:
+                return {"status": "error", "result": "未在上下文中找到可供提取信息的文件"}
+
+            return await self._extract_key_information_by_doc_id(doc_id)
             
         elif "摘要" in task.description:
             doc_id = context.get("document_id", "") # 示例
@@ -183,18 +199,49 @@ class DocumentExpertAgent(BaseAgent):
             return f"# {file_path.name}\n\n[文档读取失败]"
 
     async def _generate_summary(self, filename: str, content: str) -> str:
-        """生成文档摘要"""
+        """生成文档摘要 (现在使用SummaryTool)"""
+        logger.info(f"使用SummaryTool为 {filename} 生成摘要...")
+        return await summary_tool.run(content)
+
+    async def _extract_key_information_by_doc_id(self, doc_id: str) -> Dict[str, Any]:
+        """根据文档ID（文件名）提取关键信息"""
         try:
-            prompt = self._get_summarize_prompt(filename, content)
-            summary = await llm.acreate_text(prompt)
-            return summary.strip()
+            # 从索引中获取文件内容
+            content = self.get_document_content(doc_id)
+            if "内容获取失败" in content:
+                # 尝试直接读取文件
+                file_path = self.processed_path / doc_id
+                if not file_path.exists():
+                     file_path = self.upload_path / doc_id # 再次尝试原始上传目录
+                
+                if file_path.exists():
+                     with open(file_path, 'r', encoding='utf-8') as f:
+                         content = f.read()
+                else:
+                    return {"status": "error", "result": f"找不到文档 {doc_id} 或其内容"}
+
+            key_info = await self._extract_key_information(doc_id, content)
+            
+            # 保存提取结果
+            extract_file = self.extracts_path / f"extract_{Path(doc_id).stem}.md"
+            with open(extract_file, 'w', encoding='utf-8') as f:
+                f.write(f"# 文档关键信息提取: {doc_id}\n\n{key_info}")
+
+            return {
+                "status": "completed",
+                "result": f"已从 {doc_id} 中提取关键信息。",
+                "files_created": [extract_file.name],
+                "extracted_info": key_info,
+            }
         except Exception as e:
-            return f"摘要生成失败：{str(e)}"
+            logger.error(f"提取关键信息时出错: {e}", exc_info=True)
+            return {"status": "error", "result": f"提取关键信息失败: {e}"}
+
 
     async def _extract_key_information(self, filename: str, content: str) -> str:
         """提取关键信息"""
         try:
-            prompt = self._get_key_info_prompt(filename, content)
+            prompt = document_expert_prompts.get_key_info_extraction_prompt(filename, content, self.name)
             key_info = await llm.acreate_text(prompt)
             return key_info.strip()
         except Exception as e:

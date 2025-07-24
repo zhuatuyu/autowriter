@@ -51,7 +51,7 @@ class DirectorAgent(BaseAgent):
             },
             "case_expert": {
                 "name": "案例专家王磊", 
-                "responsibilities": ["根据主题搜索网络案例", "分析行业最佳实践", "提供外部参考资料"]
+                "responsibilities": ["根据明确的指令执行单次网络搜索", "提供原始搜索结果"]
             },
             "data_analyst": {
                 "name": "数据分析师赵丽娅",
@@ -59,11 +59,7 @@ class DirectorAgent(BaseAgent):
             },
             "writer_expert": {
                 "name": "写作专家张翰",
-                "responsibilities": ["撰写报告的特定章节", "润色文本", "优化内容结构", "根据大纲创作内容"]
-            },
-            "chief_editor": {
-                "name": "总编辑钱敏",
-                "responsibilities": ["审核报告整体质量", "把控内容一致性", "校验格式规范", "进行最终定稿"]
+                "responsibilities": ["撰写报告的特定章节", "润色和优化文本", "对多个信息源进行总结和提炼", "审核内容质量", "根据大纲创作内容"]
             },
             "director": {
                 "name": "智能项目总监",

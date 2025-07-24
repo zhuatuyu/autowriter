@@ -14,7 +14,6 @@ from backend.services.llm.agents.document_expert import DocumentExpertAgent
 from backend.services.llm.agents.case_expert import CaseExpertAgent
 from backend.services.llm.agents.writer_expert import WriterExpertAgent
 from backend.services.llm.agents.data_analyst import DataAnalystAgent
-from backend.services.llm.agents.chief_editor import ChiefEditorAgent
 from backend.services.llm.agents.planner import PlannerAgent
 from backend.services.websocket_manager import WebSocketManager
 
@@ -27,7 +26,6 @@ AGENT_TEAM_CONFIG = {
     'case_expert': CaseExpertAgent,
     'writer_expert': WriterExpertAgent,
     'data_analyst': DataAnalystAgent,
-    'chief_editor': ChiefEditorAgent,
 }
 
 class CoreManager:
@@ -83,7 +81,7 @@ class CoreManager:
         """检查是否是现有项目"""
         try:
             # 检查是否有Agent工作区
-            agent_dirs = ['document_expert', 'case_expert', 'writer_expert', 'data_analyst', 'chief_editor']
+            agent_dirs = ['document_expert', 'case_expert', 'writer_expert', 'data_analyst'] # 移除 chief_editor
             existing_agents = 0
             
             for agent_dir in agent_dirs:
@@ -365,7 +363,6 @@ class CoreManager:
             "case_expert": "案例专家（王磊）",
             "writer_expert": "写作专家（张翰）",
             "data_analyst": "数据分析师（赵丽娅）",
-            "chief_editor": "总编辑（钱敏）",
         }
         return name_map.get(agent_id, agent_id)
 

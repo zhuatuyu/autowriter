@@ -15,6 +15,7 @@ from metagpt.logs import logger
 
 from .base import BaseAgent
 from backend.services.llm_provider import llm
+from backend.tools.summary_tool import summary_tool # 导入摘要工具
 
 # 导入新的Prompt模块
 from backend.services.llm.prompts import writer_expert_prompts
@@ -25,36 +26,43 @@ class ContentWritingAction(Action):
     
     async def run(self, chapter: str, requirements: str, context: str = "") -> str:
         """执行内容写作"""
-        # 使用新的Prompt模块
         prompt = writer_expert_prompts.get_section_writing_prompt(chapter, requirements, context, "张翰")
-        
         try:
-            content = await llm.acreate_text(prompt)
-            return content.strip()
+            return await llm.acreate_text(prompt)
         except Exception as e:
             logger.error(f"内容写作失败: {e}")
             return f"写作失败: {str(e)}"
 
-
-class ContentReviewAction(Action):
-    """内容审核动作"""
-    
-    async def run(self, content: str, requirements: str) -> str:
-        """审核和优化内容"""
-        # 使用新的Prompt模块
-        prompt = writer_expert_prompts.get_content_optimization_prompt(content, "专业报告", "张翰")
-        
+class ContentPolishAction(Action):
+    """内容润色动作 (新合并的能力)"""
+    async def run(self, content: str, style: str = "专业报告") -> str:
+        prompt = writer_expert_prompts.get_content_polish_prompt(content, style, "张翰")
         try:
-            optimized_content = await llm.acreate_text(prompt)
-            return optimized_content.strip()
+            return await llm.acreate_text(prompt)
+        except Exception as e:
+            logger.error(f"内容润色失败: {e}")
+            return content
+
+class QualityReviewAction(Action):
+    """内容质量审核动作 (新合并的能力)"""
+    async def run(self, content: str) -> str:
+        prompt = writer_expert_prompts.get_quality_review_prompt(content, "张翰")
+        try:
+            return await llm.acreate_text(prompt)
         except Exception as e:
             logger.error(f"内容审核失败: {e}")
-            return content  # 如果审核失败，返回原内容
+            return json.dumps({"error": f"审核失败: {e}"})
+
+class SummarizeAction(Action):
+    """内容摘要动作 (新能力)"""
+    async def run(self, text_to_summarize: str) -> str:
+        # 这里可以直接调用summary_tool，也可以使用专属prompt，调用工具更符合解耦原则
+        return await summary_tool.run(text_to_summarize)
 
 
 class WriterExpertAgent(BaseAgent):
     """
-    ✍️ 写作专家（张翰） - 虚拟办公室的内容创作者
+    ✍️ 写作专家（张翰） - 虚拟办公室的内容创作者、优化师和总结者
     """
     def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
@@ -63,7 +71,7 @@ class WriterExpertAgent(BaseAgent):
             workspace_path=workspace_path,
             memory_manager=memory_manager,
             profile="写作专家",
-            goal="撰写高质量、结构清晰的报告内容"
+            goal="撰写、优化和总结高质量、结构清晰的报告内容"
         )
         
         # 初始化写作工具和模板
@@ -72,217 +80,223 @@ class WriterExpertAgent(BaseAgent):
         # 设置专家信息
         self.name = "张翰"
         self.avatar = "✍️"
-        self.expertise = "内容写作与编辑"
+        self.expertise = "内容写作、润色、审核与总结"
         
-        # 设置动作
-        self.set_actions([ContentWritingAction, ContentReviewAction])
+        # 设置动作 (合并了总编辑的能力)
+        self.set_actions([ContentWritingAction, ContentPolishAction, QualityReviewAction, SummarizeAction])
         
         # 创建写作工作目录
         self.drafts_dir = self.agent_workspace / "drafts"
+        self.polished_dir = self.agent_workspace / "polished" # 原总编辑目录
         self.reviews_dir = self.agent_workspace / "reviews"
-        self.drafts_dir.mkdir(exist_ok=True)
-        self.reviews_dir.mkdir(exist_ok=True)
+        self.summaries_dir = self.agent_workspace / "summaries" # 新增摘要目录
         
-        logger.info(f"✍️ 写作专家 {self.name} 初始化完成")
+        for dir_path in [self.drafts_dir, self.polished_dir, self.reviews_dir, self.summaries_dir]:
+            dir_path.mkdir(exist_ok=True)
+        
+        logger.info(f"✍️ 写作专家 {self.name} 初始化完成，已整合总编辑能力。")
+
     
     def _load_writing_templates(self) -> Dict[str, str]:
         """加载写作模板"""
         return {
-            "executive_summary": """
-# 执行摘要
-
-## 项目概述
-{project_overview}
-
-## 主要成果
-{key_achievements}
-
-## 关键指标
-{key_metrics}
-
-## 结论与建议
-{conclusions}
-""",
-            "introduction": """
-# 引言
-
-## 背景
-{background}
-
-## 目标
-{objectives}
-
-## 方法
-{methodology}
-""",
-            "analysis": """
-# 分析章节
-
-## 数据概述
-{data_overview}
-
-## 关键发现
-{key_findings}
-
-## 趋势分析
-{trend_analysis}
-""",
-            "conclusion": """
-# 结论
-
-## 主要成果
-{main_results}
-
-## 经验总结
-{lessons_learned}
-
-## 未来展望
-{future_outlook}
-"""
+            "standard_report": {
+                "structure": ["引言", "现状分析", "方案设计", "效益评估", "结论建议"],
+                "description": "标准项目报告模板"
+            },
+            "research_paper": {
+                "structure": ["摘要", "引言", "相关研究", "研究方法", "实验结果", "讨论", "结论"],
+                "description": "学术研究论文模板"
+            }
         }
     
     async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行具体的写作任务
-        task.description 会包含写作要求
-        context 会包含上游任务（如数据分析、案例研究）的结果
-        """
+        """执行具体的写作或内容处理任务"""
         logger.info(f"✍️ {self.name} 开始执行任务: {task.description}")
 
-        # 将上下文信息格式化，以便LLM理解
-        context_str = json.dumps(context, ensure_ascii=False, indent=2)
+        # 简单的基于关键词的任务路由
+        task_desc = task.description.lower()
         
-        # 提取章节标题 (简化处理)
-        chapter_title_match = re.search(r"撰写(.*?)章节", task.description)
-        chapter_title = chapter_title_match.group(1).strip() if chapter_title_match else "综合内容"
+        # 提取上下文中的内容
+        source_content = ""
+        if isinstance(context, dict):
+            # 聚合所有上游任务的结果内容
+            contents = []
+            for key, value in context.items():
+                if isinstance(value, dict) and 'result' in value:
+                    res = value['result']
+                    if isinstance(res, dict) and 'content' in res:
+                        contents.append(res['content'])
+                    elif isinstance(res, str):
+                        contents.append(res)
+            source_content = "\n\n---\n\n".join(contents)
 
-        writing_action = ContentWritingAction()
+        if not source_content and "撰写" not in task_desc:
+             # 对于需要输入内容的任务，检查source_content
+            if "润色" in task_desc or "优化" in task_desc or "审核" in task_desc or "总结" in task_desc or "摘要" in task_desc:
+                 return {"status": "error", "result": "未在上下文中找到可供处理的内容"}
+
+        if "润色" in task_desc or "优化" in task_desc:
+            style_match = re.search(r"按照(.*?)风格", task_desc)
+            style = style_match.group(1).strip() if style_match else "专业报告"
+            return await self._polish_content({"content": source_content, "style": style})
+
+        elif "审核" in task_desc or "校对" in task_desc:
+            return await self._review_content({"content": source_content})
+
+        elif "总结" in task_desc or "摘要" in task_desc:
+            return await self._summarize_content({"content": source_content})
+            
+        elif "撰写" in task_desc:
+            # 这里的上下文可能更多是作为参考，而不是直接处理对象
+            return await self._write_content(task, source_content)
         
-        try:
-            # 调用Action执行写作
-            written_content = await writing_action.run(
-                chapter=chapter_title,
-                requirements=task.description,
-                context=context_str
-            )
-            
-            # 保存草稿
-            draft_path = self.drafts_dir / f"{chapter_title.replace(' ', '_')}_{task.id}.md"
-            with open(draft_path, "w", encoding="utf-8") as f:
-                f.write(written_content)
+        else:
+            # 默认当作一个写作任务处理
+            logger.warning(f"无法精确匹配任务 '{task.description}'，将按默认写作任务处理。")
+            return await self._write_content(task, source_content)
 
-            return {
-                "status": "completed",
-                "result": {
-                    "message": f"章节 '{chapter_title}' 的初稿已完成。",
-                    "draft_file": str(draft_path),
-                    "content_preview": written_content[:200] + "..."
-                }
-            }
-        except Exception as e:
-            error_msg = f"❌ 执行写作任务时出错: {e}"
-            logger.error(error_msg)
-            return {
-                "status": "error",
-                "result": error_msg
-            }
 
-    async def _review_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """审核内容"""
+    async def _write_content(self, task: "Task", context_str: str) -> Dict[str, Any]:
+        """撰写新内容"""
         try:
-            content = task.get('content', '')
-            requirements = task.get('requirements', '标准审核')
-            
-            self.current_task = "正在审核内容质量"
+            # 简化：直接使用task.description作为写作要求
+            requirements = task.description
+            # 章节标题可以从task.description中提取，或使用task.id
+            chapter = f"章节_{task.id}"
+
+            self.current_task = f"正在撰写: {chapter}"
             self.progress = 10
             
-            # 执行审核动作
-            review_action = ContentReviewAction()
-            optimized_content = await review_action.run(content, requirements)
+            writing_action = ContentWritingAction()
+            content = await writing_action.run(chapter=chapter, requirements=requirements, context=context_str)
             
-            self.progress = 80
+            self.progress = 90
             
-            # 保存审核结果
-            review_file = self.reviews_dir / f"review_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(review_file, 'w', encoding='utf-8') as f:
-                f.write(f"# 内容审核报告\n\n")
-                f.write(f"**审核时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"**审核专家**: {self.name}\n\n")
-                f.write(f"## 原始内容\n\n{content}\n\n")
-                f.write(f"## 优化后内容\n\n{optimized_content}\n\n")
-                f.write(f"---\n*审核完成: {self.name} ✍️*")
+            draft_file = self.drafts_dir / f"draft_{chapter}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            with open(draft_file, 'w', encoding='utf-8') as f:
+                f.write(content)
             
             self.progress = 100
             
-            result = {
+            return {
                 'agent_id': self.agent_id,
                 'status': 'completed',
-                'result': f"已完成内容审核和优化",
-                'files_created': [review_file.name],
-                'optimized_content': optimized_content,
-                'timestamp': datetime.now().isoformat()
+                'result': f"已完成 '{chapter}' 的草稿撰写",
+                'files_created': [draft_file.name],
+                'content': content,
             }
-            
-            return result
-            
         except Exception as e:
-            logger.error(f"❌ {self.name} 内容审核失败: {e}")
-            raise
+            logger.error(f"❌ {self.name} 内容撰写失败: {e}", exc_info=True)
+            return {"status": "error", "result": f"内容撰写失败: {e}"}
 
-    async def _optimize_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """优化内容"""
+    async def _polish_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """润色内容 (原总编辑能力)"""
         try:
-            self.current_task = "正在优化内容结构和表达"
+            content = task.get('content', '')
+            style = task.get('style', '专业报告')
             
-            # 读取草稿文件进行优化
-            draft_files = list(self.drafts_dir.glob("*.md"))
-            if not draft_files:
-                return {
-                    'agent_id': self.agent_id,
-                    'status': 'completed',
-                    'result': "暂无草稿文件可供优化",
-                    'files_created': []
-                }
+            self.current_task = f"正在润色内容，风格：{style}"
+            self.progress = 10
             
-            optimized_files = []
-            for draft_file in draft_files[-3:]:  # 优化最近的3个文件
-                with open(draft_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                
-                # 执行优化
-                review_action = ContentReviewAction()
-                optimized_content = await review_action.run(content, "优化结构和表达")
-                
-                # 保存优化结果
-                optimized_file = self.reviews_dir / f"optimized_{draft_file.stem}.md"
-                with open(optimized_file, 'w', encoding='utf-8') as f:
-                    f.write(optimized_content)
-                
-                optimized_files.append(optimized_file.name)
+            polish_action = ContentPolishAction()
+            polished_content = await polish_action.run(content, style)
             
-            result = {
+            self.progress = 80
+            
+            polish_file = self.polished_dir / f"polished_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            with open(polish_file, 'w', encoding='utf-8') as f:
+                f.write(polished_content)
+            
+            self.progress = 100
+            
+            return {
                 'agent_id': self.agent_id,
                 'status': 'completed',
-                'result': f"已优化 {len(optimized_files)} 个内容文件",
-                'files_created': optimized_files,
-                'timestamp': datetime.now().isoformat()
+                'result': f"已完成内容润色，风格调整为{style}",
+                'files_created': [polish_file.name],
+                'content': polished_content, # 返回润色后的内容
             }
             
-            return result
+        except Exception as e:
+            logger.error(f"❌ {self.name} 内容润色失败: {e}", exc_info=True)
+            return {"status": "error", "result": f"内容润色失败: {e}"}
+
+    async def _review_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """审核内容 (原总编辑能力)"""
+        try:
+            content = task.get('content', '')
+            
+            self.current_task = "正在进行内容质量审核"
+            self.progress = 10
+            
+            review_action = QualityReviewAction()
+            review_result = await review_action.run(content)
+            
+            self.progress = 80
+            
+            review_file = self.reviews_dir / f"review_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            with open(review_file, 'w', encoding='utf-8') as f:
+                f.write(f"# 内容审核报告\n\n{review_result}")
+            
+            self.progress = 100
+            
+            return {
+                'agent_id': self.agent_id,
+                'status': 'completed',
+                'result': "已完成内容质量审核",
+                'files_created': [review_file.name],
+                'review': review_result,
+            }
             
         except Exception as e:
-            logger.error(f"❌ {self.name} 内容优化失败: {e}")
-            raise
+            logger.error(f"❌ {self.name} 内容审核失败: {e}", exc_info=True)
+            return {"status": "error", "result": f"内容审核失败: {e}"}
+
+    async def _summarize_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """总结内容"""
+        try:
+            content = task.get('content', '')
+            self.current_task = "正在生成内容摘要"
+            self.progress = 10
+            
+            summarize_action = SummarizeAction()
+            summary_text = await summarize_action.run(content)
+
+            self.progress = 80
+
+            summary_file = self.summaries_dir / f"summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                f.write(summary_text)
+
+            self.progress = 100
+            
+            return {
+                'agent_id': self.agent_id,
+                'status': 'completed',
+                'result': "已完成内容摘要生成",
+                'files_created': [summary_file.name],
+                'content': summary_text, # 将摘要作为主要内容返回
+            }
+
+        except Exception as e:
+            logger.error(f"❌ {self.name} 内容摘要失败: {e}", exc_info=True)
+            return {"status": "error", "result": f"内容摘要失败: {e}"}
+
 
     async def get_work_summary(self) -> str:
         """获取工作摘要"""
         try:
             draft_count = len(list(self.drafts_dir.glob("*.md")))
+            polished_count = len(list(self.polished_dir.glob("*.md")))
             review_count = len(list(self.reviews_dir.glob("*.md")))
+            summary_count = len(list(self.summaries_dir.glob("*.md")))
             
             summary = f"✍️ {self.name} 工作摘要:\n"
             summary += f"• 已撰写草稿: {draft_count} 份\n"
-            summary += f"• 完成审核: {review_count} 份\n"
+            summary += f"• 已润色文稿: {polished_count} 份\n"
+            summary += f"• 已审核内容: {review_count} 次\n"
+            summary += f"• 已生成摘要: {summary_count} 份\n"
             summary += f"• 当前状态: {self.status}\n"
             
             if self.current_task:

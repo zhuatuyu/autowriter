@@ -6,111 +6,116 @@ import json
 from backend.models.plan import Plan
 
 def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_capabilities: dict) -> str:
-    """获取用于生成行动计划的Prompt"""
+    """获取用于生成计划的Prompt"""
     return f"""
-# 指令
-作为一名世界级的AI项目总监，你的任务是将用户的模糊需求，结合对话历史，转化为一个清晰、结构化的JSON格式的行动计划（Plan）。
+# 指令：作为智能项目总监，为用户请求制定一份详尽的、可执行的SOP（Standard Operating Procedure）计划。
 
-## 1. 上下文
-**对话历史:**
+## 核心原则
+1.  **SOP思维**: 你的输出不是一个简单的任务列表，而是一个完整的、端到端的操作流程。每个步骤都应该是一个独立的、可执行的、原子化的任务。
+2.  **明确委派**: 必须为每个任务（Task）精确指定一个最合适的`agent`。
+3.  **细粒度拆分**: 将复杂的用户请求拆解成多个逻辑上独立的子任务。例如，一个“研究并报告”的需求，应至少拆分为“搜索”、“总结”、“撰写”等步骤。
+4.  **闭环流程**: 确保流程是完整的。例如，有“搜索”任务，就必须有后续的“总结”或“整合”任务；有“撰写”任务，就应该考虑后续的“润色”或“审核”任务。
+5.  **依赖管理**: 在任务的`description`中，如果需要依赖前序任务的结果，请明确指出。例如："总结Task 1和Task 2的搜索结果"。
+6.  **具体化**: 对于搜索任务，`description`必须是一个具体的查询语句，而不是泛化的描述。例如，"搜索关于Python编程的最新趋势" 比 "搜索最新趋势" 更具体。
+
+## 可用的专家智能体团队
+```json
+{json.dumps(agent_capabilities, indent=2, ensure_ascii=False)}
+```
+
+## 当前对话上下文（最近5条）
+---
 {formatted_history}
+---
 
-**最新用户需求:**
+## 用户最新请求
+---
 {user_message}
+---
 
-**可用专家能力:**
-{json.dumps(agent_capabilities, ensure_ascii=False, indent=2)}
-
-## 2. 你的任务
-你需要输出一个JSON对象，该对象遵循Plan和Task的数据模型。
-
-- `goal`: 必须是对用户核心目标的精准概括。
-- `tasks`: 一个有序的列表，每个task代表一个为实现goal所需执行的、不可再分的原子步骤。
-  - `description`: 必须清晰地描述这个任务“做什么”，语言应面向将要执行它的专家。
-  - `dependencies`: 如果一个任务需要等待其他任务完成，在这里列出其依赖的任务`id`。任务`id`应为`task_1`, `task_2`等，方便引用。
-
-## 3. 核心原则
-- **What, not How**: `description`只描述做什么，不操心怎么做或谁来做。
-- **原子性**: 每个Task都应该是最小的可执行单元。例如，不要创建“撰写报告”这种大任务，应拆分为“分析数据”、“撰写初稿”、“审核内容”等。
-- **逻辑性**: 任务列表必须逻辑有序。如果B任务依赖A任务的结果，B必须在A之后，并通过`dependencies`字段声明。
-- **全面性**: 计划需要覆盖从开始到结束的所有必要步骤，确保最终能完整地响应用户需求。
-- **简单任务处理**: 如果用户只是提问或咨询，计划可以只包含一个任务，如 `description: "回答用户关于写作技巧的问题"`。
-- **具体化**: 对于搜索任务，`description`必须是一个具体的查询语句，而不是泛化的描述。例如，"搜索关于Python编程的最新趋势" 比 "搜索最新趋势" 更具体。
-
-## 4. 输出格式
-你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
+## 你的任务
+请严格按照以下JSON格式，为用户的最新请求制定一份SOP计划。
 
 ```json
 {{
-  "goal": "用户的核心目标",
+  "goal": "这里填写整个计划的最终目标，必须与用户请求紧密相关。",
   "tasks": [
     {{
       "id": "task_1",
-      "description": "第一个原子任务的清晰描述",
-      "dependencies": []
+      "description": "这里填写第一个原子任务的具体、可执行的描述。例如：'搜索“数字化城市管理政府购买服务项目的成功案例”'",
+      "agent": "这里精确指定负责此任务的agent_id，例如：'case_expert'"
     }},
     {{
       "id": "task_2",
-      "description": "第二个原子任务的清晰描述",
-      "dependencies": ["task_1"]
+      "description": "这里填写第二个原子任务。例如：'总结task_1的搜索结果，提炼关键信息'",
+      "agent": "这里精确指定负责此任务的agent_id，例如：'writer_expert'"
+    }},
+    {{
+      "id": "task_3",
+      "description": "这里填写第三个原子任务。例如：'根据task_2的总结，撰写报告的“案例分析”章节'",
+      "agent": "writer_expert"
     }}
   ]
 }}
 ```
 
-现在，请为用户的最新需求生成行动计划。
+请立即生成SOP计划JSON。
 """
 
 def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_feedback: str, agent_capabilities: dict) -> str:
-    """获取用于修订行动计划的Prompt"""
+    """获取用于修订计划的Prompt"""
     return f"""
-# 指令
-作为一名世界级的AI项目总监，你的任务是根据用户的反馈，修订一个已有的行动计划。
+# 指令：作为智能项目总监，根据用户的反馈修订现有的SOP计划。
 
-## 1. 上下文
-**对话历史:**
+## 核心原则
+1.  **理解反馈**: 仔细分析用户的反馈，精准定位需要修改的计划部分。
+2.  **保持SOP结构**: 修订后的输出必须保持完整的SOP结构，不能只输出修改部分。
+3.  **保留有效部分**: 只修改用户要求变更的部分，其余未提及的任务应保持原样。
+4.  **严格的字段要求**: 每个任务（Task）都必须包含 `id`, `description`, 和 `agent` 三个字段，缺一不可。
+5.  **重新编排ID**: 如果你删除或新增了任务，请确保所有任务的 `id` 是从 `task_1` 开始连续编号的。
+
+## 可用的专家智能体团队
+```json
+{json.dumps(agent_capabilities, indent=2, ensure_ascii=False)}
+```
+
+## 当前对话上下文
+---
 {formatted_history}
+---
 
-**原始计划:**
+## 待修订的原始计划
 ```json
 {original_plan.model_dump_json(indent=2)}
 ```
 
-**用户最新反馈/修改意见:**
+## 用户的修订意见
+---
 {user_feedback}
+---
 
-**可用专家能力:**
-{json.dumps(agent_capabilities, ensure_ascii=False, indent=2)}
-
-## 2. 你的任务
-你需要输出一个**全新的、修订后的**JSON格式的行动计划（Plan）。
-
-- **整合反馈**: 新计划必须充分整合用户的修改意见。例如，如果用户要求“在第2步之前增加一个数据清洗步骤”，你就必须添加这个新任务并调整后续任务的依赖关系。
-- **重新思考**: 不要只做简单的增删。要像一个真正的项目总监一样，思考用户的反馈对整个计划的逻辑和流程意味着什么，并进行系统性的优化。
-- **保持原则**: 同样要遵循 **What, not How**、**原子性**、**逻辑性** 和 **全面性** 的原则。
-
-## 3. 输出格式
-你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
+## 你的任务
+请严格按照以下JSON格式，生成一份**完整**的、修订后的SOP计划。
 
 ```json
 {{
-  "goal": "（可能是修订后的）用户核心目标",
+  "goal": "这里填写计划的最终目标，通常保持不变。",
   "tasks": [
     {{
       "id": "task_1",
-      "description": "第一个原子任务的清晰描述",
-      "dependencies": []
+      "description": "这里填写第一个任务的描述。",
+      "agent": "这里必须指定负责此任务的agent_id。"
     }},
     {{
       "id": "task_2",
-      "description": "第二个原子任务的清晰描述",
-      "dependencies": ["task_1"]
+      "description": "这里填写第二个任务的描述。",
+      "agent": "这里必须指定负责此任务的agent_id。"
     }}
   ]
 }}
 ```
 
-现在，请生成修订后的行动计划。
+请立即生成修订后的SOP计划JSON。
 """
 
 def get_direct_answer_prompt(formatted_history: str, user_message: str, intent: str, team_summary: dict = None) -> str:

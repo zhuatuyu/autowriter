@@ -7,6 +7,7 @@ from metagpt.provider.base_llm import BaseLLM
 from metagpt.config2 import config
 from metagpt.llm import LLM
 from metagpt.provider import OpenAILLM
+from metagpt.config2 import Config
 
 class LLMProvider:
     """大语言模型提供者"""
@@ -32,12 +33,18 @@ class LLMProvider:
     def _initialize_summary_llm(self) -> BaseLLM:
         """根据配置初始化用于摘要的长文本LLM"""
         try:
-            if config.summary_llm and config.summary_llm.api_key:
-                print(f"✅ 摘要LLM已配置: {config.summary_llm.model}")
-                # 使用OpenAILLM类来创建一个独立的实例，因为它与DashScope兼容
-                return OpenAILLM(config.summary_llm)
+            # 仿照 `debate_simple.py` 的方式
+            summary_config = Config.default()
+            # 从主配置中获取api_key和base_url，但指定新的模型
+            if config.llm and config.llm.api_key:
+                summary_config.llm.api_key = config.llm.api_key
+                summary_config.llm.base_url = config.llm.base_url
+                summary_config.llm.model = "qwen-long-latest" # 摘要专用模型
+                
+                print(f"✅ 摘要LLM已配置: {summary_config.llm.model}")
+                return OpenAILLM(summary_config.llm)
             else:
-                print("⚠️ 摘要LLM配置信息不完整，将回退到使用默认LLM")
+                print("⚠️ 摘要LLM配置所需的基础信息（api_key）不完整，将回退到使用默认LLM")
                 return self.llm
         except Exception as e:
             print(f"❌ 初始化摘要LLM失败: {e}，将回退到使用默认LLM")

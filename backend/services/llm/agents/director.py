@@ -62,7 +62,7 @@ class DirectorAgent(BaseAgent):
                 "responsibilities": ["撰写报告的特定章节", "润色和优化文本", "对多个信息源进行总结和提炼", "审核内容质量", "根据大纲创作内容"]
             },
             "director": {
-                "name": "智能项目总监",
+                "name": "项目总监（吴丽）",
                 "responsibilities": ["回答用户关于项目管理、报告撰写技巧等专业问题", "提供咨询建议", "澄清用户需求"]
             }
         }
@@ -208,6 +208,63 @@ class DirectorAgent(BaseAgent):
         
         # 4. 记录交互
         self._record_user_message(user_message)
+        self._memory_adapter.add_simple_message(content=answer, role=self.profile, cause_by=f"direct_answer_{intent}")
+        
+        return answer.strip()
+
+    def _format_plan_for_display(self, plan: Plan) -> str:
+        """格式化计划以便于向用户展示，包含执行者信息。"""
+        if not plan:
+            return "抱歉，我暂时无法为您制定计划。"
+        
+        goal_text = f"**�� 最终目标:** {plan.goal}\n\n"
+        
+        tasks_text_parts = ["**📝 步骤如下:**"]
+        for i, task in enumerate(plan.tasks):
+            agent_name = "未知执行者"
+            # 安全地获取agent_id，并从能力描述中查找对应的名字
+            if hasattr(task, 'agent') and task.agent and task.agent in self.agent_capabilities:
+                agent_name = self.agent_capabilities[task.agent].get("name", "未知执行者")
+
+            tasks_text_parts.append(f"{i+1}. @{agent_name} {task.description}")
+            
+        tasks_text = "\n".join(tasks_text_parts)
+        
+        return f"**我已经为您制定了如下行动计划，请您审阅：**\n\n{goal_text}{tasks_text}"
+
+    def _format_revised_plan_for_display(self, plan: Plan) -> str:
+        """格式化修订后的计划以便于向用户展示。"""
+        # 复用主格式化逻辑
+        return self._format_plan_for_display(plan)
+
+    async def generate_direct_answer(self, user_query: str, intent: str) -> str:
+        """
+        直接回答用户的非规划类问题
+        """
+        logger.info(f"🎯 直接回答用户问题, 意图: {intent}, 内容: {user_query}")
+        
+        # 1. 准备上下文
+        history = self._memory_adapter.get_conversation_history(limit=10)
+        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
+        
+        # 2. 根据不同意图，构建不同的prompt
+        team_summary = None
+        if intent == 'status_inquiry':
+            team_summary = self._memory_adapter.get_team_summary()
+            
+        # 使用新的Prompt模块
+        prompt = director_prompts.get_direct_answer_prompt(
+            formatted_history=formatted_history,
+            user_message=user_query,
+            intent=intent,
+            team_summary=team_summary
+        )
+            
+        # 3. 调用LLM生成答案
+        answer = await self.llm.aask(prompt)
+        
+        # 4. 记录交互
+        self._record_user_message(user_query)
         self._memory_adapter.add_simple_message(content=answer, role=self.profile, cause_by=f"direct_answer_{intent}")
         
         return answer.strip()

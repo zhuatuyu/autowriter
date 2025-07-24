@@ -19,7 +19,7 @@ from metagpt.logs import logger
 # Agent信息配置
 AGENT_INFO = {
     'director': {
-        'name': '智能项目总监',
+        'name': '项目总监（吴丽）',
         'type': 'director',
         'avatar': '🎯',
         'description': '负责项目协调和客户沟通'
@@ -48,12 +48,6 @@ AGENT_INFO = {
         'avatar': '✍️',
         'description': '负责报告撰写'
     },
-    'chief_editor': {
-        'name': '总编辑（钱敏）',
-        'type': 'chief_editor',
-        'avatar': '👔',
-        'description': '负责最终审核和润色'
-    }
 }
 
 

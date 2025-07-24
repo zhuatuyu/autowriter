@@ -109,6 +109,8 @@ MetaGPT/
 
 # Example datasetspos)
 example/easy-datas
+example/easy-dataset/
+example/joyagent-jdgenie-main
 
 # Temporles
 *.tmp

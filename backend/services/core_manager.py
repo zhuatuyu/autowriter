@@ -207,10 +207,12 @@ class CoreManager:
         
         # 使用Director的LLM进行分类
         # 注意：实际项目中可以考虑使用更小、更快的模型进行分类
-        intent = await director.llm.aask(prompt)
+        raw_intent = await director.llm.aask(prompt)
+        
+        # 增加健壮性：清理LLM可能返回的多余字符
+        intent = raw_intent.strip().replace("`", "").replace("'", "").replace('"', '')
         
         # 清理并验证返回结果
-        intent = intent.strip().lower()
         valid_intents = ['trivial_chat', 'simple_qa', 'contextual_follow_up', 'status_inquiry', 'planning_request', 'plan_feedback']
         
         if intent not in valid_intents:
@@ -250,22 +252,23 @@ class CoreManager:
         if websocket_manager:
             await websocket_manager.broadcast_agent_message(session_id, "director", director.name, "正在理解您的需求，并为您草拟一份行动计划...", "working")
         
-        # 步骤 1: Director接收用户需求，生成初步Plan
+        # Director生成计划
         plan = await director.process_request(user_message)
         
-        # 步骤 2: 保存待审核的Plan
-        session_context['current_plan'] = plan
+        # 获取Director格式化好的、包含@姓名的计划文本
+        plan_display_text = director._format_plan_for_display(plan)
+
+        # 直接使用Director生成好的文本进行广播
+        await websocket_manager.broadcast_agent_message(
+            session_id, 
+            "director", 
+            director.name, 
+            plan_display_text, 
+            "pending_review" # 状态：等待用户审核
+        )
         
-        # 步骤 3: 将Plan格式化后发给用户征求意见
-        plan_for_approval = self._format_plan_for_approval(plan)
-        if websocket_manager:
-            await websocket_manager.broadcast_agent_message(
-                session_id=session_id,
-                agent_type="director",
-                agent_name=director.name,
-                content=plan_for_approval,
-                status="pending_approval" # 使用新状态
-            )
+        # 更新项目状态
+        self.sessions_context[session_id]['current_plan'] = plan
         return True
 
     async def _handle_plan_feedback(self, session_id: str, user_message: str, plan: Any, websocket_manager=None) -> bool:
@@ -297,15 +300,14 @@ class CoreManager:
             revised_plan = await director.revise_plan(plan, user_message)
             session_context['current_plan'] = revised_plan # 保存修订后的计划
             
-            plan_for_approval = self._format_plan_for_approval(revised_plan)
-            if websocket_manager:
-                 await websocket_manager.broadcast_agent_message(
-                    session_id=session_id,
-                    agent_type="director",
-                    agent_name=director.name,
-                    content=plan_for_approval,
-                    status="pending_approval"
-                )
+            revised_plan_display_text = director._format_plan_for_display(revised_plan)
+            await websocket_manager.broadcast_agent_message(
+                session_id=session_id,
+                agent_type="director",
+                agent_name=director.name,
+                content=revised_plan_display_text,
+                status="pending_review"
+            )
         return True
 
     def _format_plan_for_approval(self, plan: Any) -> str:

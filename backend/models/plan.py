@@ -13,7 +13,8 @@ class Task(BaseModel):
     """
     id: str = Field(default_factory=lambda: f"task_{uuid.uuid4().hex[:8]}")
     description: str = Field(..., description="任务的详细描述，清晰地说明需要做什么")
-    owner_agent_id: Optional[str] = Field(None, description="负责执行此任务的Agent的ID")
+    agent: Optional[str] = Field(None, description="负责执行此任务的Agent的ID，由Director指定")
+    owner_agent_id: Optional[str] = Field(None, description="（已弃用，请使用agent）负责执行此任务的Agent的ID")
     status: str = Field("pending", description="任务状态: pending, in_progress, completed, error")
     dependencies: List[str] = Field([], description="此任务依赖的其他任务ID列表")
     result: Optional[Any] = Field(None, description="任务执行后的结果")

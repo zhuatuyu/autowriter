@@ -217,14 +217,25 @@ class DirectorAgent(BaseAgent):
         if not plan:
             return "抱歉，我暂时无法为您制定计划。"
         
-        goal_text = f"**�� 最终目标:** {plan.goal}\n\n"
+        goal_text = f"**🎯 最终目标:** {plan.goal}\n\n"
         
         tasks_text_parts = ["**📝 步骤如下:**"]
+        
+        # 诊断日志：打印出可用的Agent能力
+        logger.info(f"======== 格式化计划展示：可用Agent能力 ========")
+        logger.info(self.agent_capabilities)
+        logger.info(f"==============================================")
+        
         for i, task in enumerate(plan.tasks):
             agent_name = "未知执行者"
+            agent_id = getattr(task, 'agent', 'N/A')
+            
+            # 诊断日志：打印每个任务的agent_id
+            logger.info(f"正在处理 Task {task.id}, Agent ID: {agent_id}")
+            
             # 安全地获取agent_id，并从能力描述中查找对应的名字
-            if hasattr(task, 'agent') and task.agent and task.agent in self.agent_capabilities:
-                agent_name = self.agent_capabilities[task.agent].get("name", "未知执行者")
+            if agent_id != 'N/A' and agent_id in self.agent_capabilities:
+                agent_name = self.agent_capabilities[agent_id].get("name", "未知执行者")
 
             tasks_text_parts.append(f"{i+1}. @{agent_name} {task.description}")
             
@@ -236,35 +247,3 @@ class DirectorAgent(BaseAgent):
         """格式化修订后的计划以便于向用户展示。"""
         # 复用主格式化逻辑
         return self._format_plan_for_display(plan)
-
-    async def generate_direct_answer(self, user_query: str, intent: str) -> str:
-        """
-        直接回答用户的非规划类问题
-        """
-        logger.info(f"🎯 直接回答用户问题, 意图: {intent}, 内容: {user_query}")
-        
-        # 1. 准备上下文
-        history = self._memory_adapter.get_conversation_history(limit=10)
-        formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
-        
-        # 2. 根据不同意图，构建不同的prompt
-        team_summary = None
-        if intent == 'status_inquiry':
-            team_summary = self._memory_adapter.get_team_summary()
-            
-        # 使用新的Prompt模块
-        prompt = director_prompts.get_direct_answer_prompt(
-            formatted_history=formatted_history,
-            user_message=user_query,
-            intent=intent,
-            team_summary=team_summary
-        )
-            
-        # 3. 调用LLM生成答案
-        answer = await self.llm.aask(prompt)
-        
-        # 4. 记录交互
-        self._record_user_message(user_query)
-        self._memory_adapter.add_simple_message(content=answer, role=self.profile, cause_by=f"direct_answer_{intent}")
-        
-        return answer.strip()

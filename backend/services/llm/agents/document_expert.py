@@ -128,42 +128,57 @@ class DocumentExpertAgent(BaseAgent):
         # 使用新的Prompt模块
         return document_expert_prompts.get_key_info_extraction_prompt(filename, content, self.name)
 
-    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行具体的文档处理任务
-        task.description 将包含具体的指令，如 "处理上传的文件" 或 "提取关键信息"
-        """
+    async def _execute_specific_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
+        """使用MetaGPT标准的Message历史执行文档处理任务"""
         logger.info(f"📄 {self.name} 开始执行任务: {task.description}")
+
+        # 从Message历史中提取内容和文件信息
+        file_path = ""
+        doc_id = ""
+        
+        if history_messages:
+            for msg in history_messages:
+                if hasattr(msg, 'content') and msg.content:
+                    # 尝试从消息内容中提取文件路径或文档ID
+                    if "file_path" in msg.content:
+                        # 简单的文件路径提取逻辑
+                        import re
+                        path_match = re.search(r'file_path[\'"]?\s*:\s*[\'"]?([^\'"]+)', msg.content)
+                        if path_match:
+                            file_path = path_match.group(1)
+                    elif "document_id" in msg.content:
+                        # 简单的文档ID提取逻辑
+                        import re
+                        id_match = re.search(r'document_id[\'"]?\s*:\s*[\'"]?([^\'"]+)', msg.content)
+                        if id_match:
+                            doc_id = id_match.group(1)
 
         # 简单的基于关键词的任务路由
         if "处理" in task.description and "文件" in task.description:
-            # 假设文件路径等信息在context中
-            file_path = context.get("file_path", "") # 示例
             if file_path:
                 return await self.process_uploaded_file(file_path)
             else:
-                 return {"status": "error", "result": "未在上下文中找到需要处理的文件路径"}
+                return {"status": "error", "result": "未在Message历史中找到需要处理的文件路径"}
 
         elif "提取" in task.description and "信息" in task.description:
-            doc_id = context.get("document_id", "") # 示例
             if not doc_id:
-                 # 尝试从上下文中获取文件名
-                 if context:
-                     for key, value in context.items():
-                         if isinstance(value, dict) and 'result' in value:
-                             res = value['result']
-                             if isinstance(res, dict) and 'files_created' in res and res['files_created']:
-                                 # 假设使用第一个创建的文件
-                                 doc_id = res['files_created'][0]
-                                 break
+                # 尝试从历史消息中获取最近创建的文件作为doc_id
+                for msg in reversed(history_messages):
+                    if hasattr(msg, 'content') and "files_created" in msg.content:
+                        import re
+                        files_match = re.search(r'files_created[\'"]?\s*:\s*\[\'"]?([^\'"]+)', msg.content)
+                        if files_match:
+                            doc_id = files_match.group(1)
+                            break
             
             if not doc_id:
-                return {"status": "error", "result": "未在上下文中找到可供提取信息的文件"}
+                return {"status": "error", "result": "未在Message历史中找到可供提取信息的文件"}
 
             return await self._extract_key_information_by_doc_id(doc_id)
             
         elif "摘要" in task.description:
-            doc_id = context.get("document_id", "") # 示例
+            if not doc_id:
+                return {"status": "error", "result": "未在Message历史中找到需要摘要的文档"}
             return await self.create_summary(doc_id)
 
         else:

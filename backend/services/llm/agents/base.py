@@ -282,7 +282,7 @@ class BaseAgent(Role):
             return False
     
     async def execute_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行任务的通用方法"""
+        """执行任务的通用方法（保持向后兼容）"""
         try:
             self.status = 'working'
             self.current_task = task.description
@@ -290,9 +290,6 @@ class BaseAgent(Role):
             
             # 保存状态
             self._save_workspace_state()
-            
-            # 再次确认并移除此错误行：它会用字符串覆盖从Planner传来的结构化context字典
-            # context = self.get_work_context() 
             
             # 执行具体任务（子类重写）
             result = await self._execute_specific_task(task, context)
@@ -320,14 +317,96 @@ class BaseAgent(Role):
                 'result': f'任务执行失败: {str(e)}',
                 'error': str(e)
             }
+
+    async def execute_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
+        """使用MetaGPT标准的Message历史执行任务"""
+        try:
+            self.status = 'working'
+            self.current_task = task.description
+            self.progress = 0
+            
+            # 保存状态
+            self._save_workspace_state()
+            
+            # 将Message历史添加到记忆中
+            for msg in history_messages:
+                self.rc.memory.add(msg)
+            
+            # 执行具体任务（使用MetaGPT标准）
+            result = await self._execute_specific_task_with_messages(task, history_messages)
+            
+            # 记录工作记忆
+            self.record_work_memory(
+                task.description,
+                result.get('result', '任务完成')
+            )
+            
+            # 更新状态
+            self.status = 'completed'
+            self.progress = 100
+            self._save_workspace_state()
+            
+            return result
+            
+        except Exception as e:
+            self.status = 'error'
+            self._save_workspace_state()
+            logger.error(f"❌ {self.name} 执行任务失败: {e}")
+            return {
+                'agent_id': self.agent_id,
+                'status': 'error',
+                'result': f'任务执行失败: {str(e)}',
+                'error': str(e)
+            }
     
     async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行具体任务，子类需要重写此方法"""
+        """执行具体任务，子类需要重写此方法（向后兼容版本）"""
         return {
             'agent_id': self.agent_id,
             'status': 'completed',
             'result': f'{self.name} 已完成任务: {task.description}',
         }
+
+    async def _execute_specific_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
+        """使用MetaGPT标准的Message历史执行具体任务，子类应该重写此方法"""
+        # 默认实现：将Messages转换为内容字符串，调用Action
+        try:
+            # 如果Agent有设置actions，使用第一个action来执行
+            if self.actions:
+                action = self.actions[0]
+                # MetaGPT标准：Action.run接收history messages
+                result_content = await action.run(history_messages)
+                
+                return {
+                    'agent_id': self.agent_id,
+                    'status': 'completed',
+                    'result': {
+                        'content': result_content,
+                        'message': f'{self.name} 已完成任务: {task.description}'
+                    }
+                }
+            else:
+                # 如果没有actions，使用默认逻辑
+                return await self._execute_specific_task(task, self._messages_to_context(history_messages))
+        except Exception as e:
+            logger.error(f"❌ {self.name} 执行任务失败: {e}", exc_info=True)
+            return {
+                'agent_id': self.agent_id,
+                'status': 'error',
+                'result': f'任务执行失败: {str(e)}'
+            }
+
+    def _messages_to_context(self, messages: List[Message]) -> Dict[str, Any]:
+        """将Message列表转换为传统的context字典（向后兼容）"""
+        context = {}
+        for i, msg in enumerate(messages):
+            task_id = f"task_{i+1}"
+            context[task_id] = {
+                'content': msg.content,
+                'cause_by': msg.cause_by,
+                'sent_from': msg.sent_from
+            }
+        return context
     
     def get_team_context(self) -> Dict[str, Any]:
         """获取团队上下文信息（仅在统一记忆系统中可用）"""

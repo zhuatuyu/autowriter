@@ -2,9 +2,10 @@
 PlannerAgent - 规划执行者
 负责接收Plan并调度Expert Agents执行Tasks
 """
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from metagpt.logs import logger
+from metagpt.schema import AIMessage, Message
 from backend.services.llm.agents.base import BaseAgent
 from backend.models.plan import Plan, Task
 
@@ -30,14 +31,6 @@ class PlannerAgent(BaseAgent):
             goal="高效、准确地执行计划，协调团队完成任务"
         )
         self.role = "项目经理"
-        # self.expert_map = self._initialize_expert_map() # 弃用基于关键词的路由
-
-    def _initialize_expert_map(self) -> Dict[str, str]:
-        """
-        (已弃用) 初始化任务描述关键词到专家AgentID的映射。
-        现在Planner将严格按照Director在Plan中指定的agent_id来分配任务。
-        """
-        return {}
 
     async def execute_plan(self, plan: Plan, expert_team: Dict[str, BaseAgent]) -> Dict[str, Any]:
         """
@@ -70,9 +63,11 @@ class PlannerAgent(BaseAgent):
             
             # 执行任务
             try:
-                # 传递任务本身和上下文信息（例如之前任务的结果）
-                context = self._gather_context_for_task(plan, next_task)
-                task_result = await expert_agent.execute_task(next_task, context)
+                # 收集依赖任务的结果作为Message历史（符合MetaGPT标准）
+                history_messages = self._gather_context_for_task(plan, next_task)
+                
+                # 使用MetaGPT标准的Action执行方式
+                task_result = await expert_agent.execute_task_with_messages(next_task, history_messages)
                 
                 # 增强：检查任务执行状态
                 if task_result and task_result.get("status") == "completed":
@@ -116,18 +111,38 @@ class PlannerAgent(BaseAgent):
         task.owner_agent_id = agent_id # 记录执行者
         return expert_team.get(agent_id)
         
-    def _gather_context_for_task(self, plan: Plan, current_task: Task) -> Dict[str, Any]:
-        """为当前任务收集其依赖任务的结果作为上下文"""
-        context = {}
+    def _gather_context_for_task(self, plan: Plan, current_task: Task) -> List[Message]:
+        """为当前任务收集其依赖任务的结果作为Message历史（符合MetaGPT标准）"""
+        history_messages = []
         if not current_task.dependencies:
-            return context
+            return history_messages
         
         for dep_id in current_task.dependencies:
             dep_task = plan.get_task_by_id(dep_id)
-            if dep_task and dep_task.status == "completed":
-                context[dep_id] = dep_task.result
+            if dep_task and dep_task.status == "completed" and dep_task.result:
+                # 从依赖任务结果中提取内容
+                if isinstance(dep_task.result, dict):
+                    if 'content' in dep_task.result:
+                        content = dep_task.result['content']
+                    elif 'result' in dep_task.result:
+                        if isinstance(dep_task.result['result'], dict) and 'content' in dep_task.result['result']:
+                            content = dep_task.result['result']['content']
+                        else:
+                            content = str(dep_task.result['result'])
+                    else:
+                        content = str(dep_task.result)
+                else:
+                    content = str(dep_task.result)
+                
+                # 创建符合MetaGPT标准的AIMessage
+                msg = AIMessage(
+                    content=content,
+                    cause_by=f"task_{dep_id}_completion",
+                    sent_from=f"agent_{dep_task.owner_agent_id or dep_task.agent}"
+                )
+                history_messages.append(msg)
         
-        return context
+        return history_messages
 
     def _summarize_plan_result(self, plan: Plan) -> Dict[str, Any]:
         """汇总计划的最终结果"""

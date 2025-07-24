@@ -15,7 +15,7 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
 2.  **明确委派**: 必须为每个任务（Task）精确指定一个最合适的`agent`。
 3.  **细粒度拆分**: 将复杂的用户请求拆解成多个逻辑上独立的子任务。例如，一个“研究并报告”的需求，应至少拆分为“搜索”、“总结”、“撰写”等步骤。
 4.  **闭环流程**: 确保流程是完整的。例如，有“搜索”任务，就必须有后续的“总结”或“整合”任务；有“撰写”任务，就应该考虑后续的“润色”或“审核”任务。
-5.  **依赖管理**: 在任务的`description`中，如果需要依赖前序任务的结果，请明确指出。例如："总结Task 1和Task 2的搜索结果"。
+5.  **依赖管理**: 在任务的`dependencies`字段中明确列出依赖的任务ID。例如，如果task_2需要task_1的结果，则task_2的dependencies应为["task_1"]。在任务的`description`中也应明确提及依赖关系，例如："总结task_1的搜索结果"。
 6.  **具体化**: 对于搜索任务，`description`必须是一个具体的查询语句，而不是泛化的描述。例如，"搜索关于Python编程的最新趋势" 比 "搜索最新趋势" 更具体。
 
 ## 可用的专家智能体团队
@@ -42,18 +42,21 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
   "tasks": [
     {{
       "id": "task_1",
-      "description": "这里填写第一个原子任务的具体、可执行的描述。例如：'搜索“数字化城市管理政府购买服务项目的成功案例”'",
-      "agent": "这里精确指定负责此任务的agent_id，例如：'case_expert'"
+      "description": "这里填写第一个原子任务的具体、可执行的描述。例如：'搜索"数字化城市管理政府购买服务项目的成功案例"'",
+      "agent": "这里精确指定负责此任务的agent_id，例如：'case_expert'",
+      "dependencies": []
     }},
     {{
       "id": "task_2",
       "description": "这里填写第二个原子任务。例如：'总结task_1的搜索结果，提炼关键信息'",
-      "agent": "这里精确指定负责此任务的agent_id，例如：'writer_expert'"
+      "agent": "这里精确指定负责此任务的agent_id，例如：'writer_expert'",
+      "dependencies": ["task_1"]
     }},
     {{
       "id": "task_3",
-      "description": "这里填写第三个原子任务。例如：'根据task_2的总结，撰写报告的“案例分析”章节'",
-      "agent": "writer_expert"
+      "description": "这里填写第三个原子任务。例如：'根据task_2的总结，撰写报告的"案例分析"章节'",
+      "agent": "writer_expert",
+      "dependencies": ["task_2"]
     }}
   ]
 }}
@@ -71,7 +74,7 @@ def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_f
 1.  **理解反馈**: 仔细分析用户的反馈，精准定位需要修改的计划部分。
 2.  **保持SOP结构**: 修订后的输出必须保持完整的SOP结构，不能只输出修改部分。
 3.  **保留有效部分**: 只修改用户要求变更的部分，其余未提及的任务应保持原样。
-4.  **严格的字段要求**: 每个任务（Task）都必须包含 `id`, `description`, 和 `agent` 三个字段，缺一不可。
+4.  **严格的字段要求**: 每个任务（Task）都必须包含 `id`, `description`, `agent`, 和 `dependencies` 四个字段，缺一不可。dependencies应正确反映任务间的依赖关系。
 5.  **重新编排ID**: 如果你删除或新增了任务，请确保所有任务的 `id` 是从 `task_1` 开始连续编号的。
 
 ## 可用的专家智能体团队
@@ -104,12 +107,14 @@ def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_f
     {{
       "id": "task_1",
       "description": "这里填写第一个任务的描述。",
-      "agent": "这里必须指定负责此任务的agent_id。"
+      "agent": "这里必须指定负责此任务的agent_id。",
+      "dependencies": []
     }},
     {{
       "id": "task_2",
       "description": "这里填写第二个任务的描述。",
-      "agent": "这里必须指定负责此任务的agent_id。"
+      "agent": "这里必须指定负责此任务的agent_id。",
+      "dependencies": ["task_1"]
     }}
   ]
 }}

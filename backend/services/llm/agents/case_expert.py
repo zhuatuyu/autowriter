@@ -88,36 +88,32 @@ class CaseExpertAgent(BaseAgent):
         logger.info(f"🔍 案例专家 {self.name} 初始化完成")
 
 
-    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
+    async def _execute_specific_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
         """
-        执行具体的案例研究任务
-        task.description 会包含需要研究的主题或关键词
+        使用MetaGPT标准的Message历史执行案例研究任务
         """
         logger.info(f"🔍 {self.name} 开始执行任务: {task.description}")
 
         # 从任务描述中提取查询关键词 (简化处理)
-        # 移除了不必要的词语，更直接地使用任务描述作为查询核心
         query = task.description.replace("研究", "").replace("搜索", "").replace("案例", "").replace("关于", "").replace("和相关", "").strip()
 
         try:
-            # 统一调用搜索逻辑，但现在 _search_cases 只会执行一次精确搜索
+            # 统一调用搜索逻辑
             search_task_payload = {"query": query}
             search_result_dict = await self._search_cases(search_task_payload)
 
-            # 检查执行状态
+            # 检查子任务执行状态
             if search_result_dict.get("status") != "completed":
-                 return {
-                    "status": "error",
-                    "result": search_result_dict.get("result", "案例搜索失败，详情未知。")
-                }
+                 return search_result_dict # 直接返回带有错误信息的字典
 
             # 成功后，将结果格式化以符合新架构的期望
+            # 关键：确保将 `content` 传递下去
             return {
                 "status": "completed",
                 "result": {
                     "message": f"关于 '{query}' 的案例研究已完成。",
-                    "summary": search_result_dict.get("summary", "无摘要"),
                     "files_created": search_result_dict.get("files_created", []),
+                    "content": search_result_dict.get("content", "") # 从搜索结果中提取content
                 }
             }
 

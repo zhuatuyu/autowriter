@@ -128,3 +128,31 @@ def get_section_writing_prompt(section_title: str, requirements: str, context: s
 ## 输出格式
 请直接输出章节内容，使用Markdown格式。
 """ 
+
+def get_tool_selection_prompt(instruction: str, tools_description: str, writer_name: str) -> str:
+    """获取用于从工具箱中选择最合适工具的Prompt"""
+    return f"""
+作为写作专家{writer_name}，我收到了一个任务指令，需要从我的工具箱中选择最合适的工具来完成。
+
+## 我的任务指令
+---
+{instruction}
+---
+
+## 我的工具箱
+我拥有以下工具，每个工具都有其特定的用途：
+---
+{tools_description}
+---
+
+## 决策任务
+请分析我的任务指令，并从我的工具箱中，选择一个且仅一个最匹配的工具来执行。
+
+## 输出格式
+请严格按照以下格式返回你选择的工具的名称（tool_name），不要包含任何其他解释或多余的文字。
+```json
+{{
+  "tool_name": "这里填写你选择的工具的名称"
+}}
+```
+""" 

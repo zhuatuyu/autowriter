@@ -104,53 +104,33 @@ class DataAnalystAgent(BaseAgent):
             }
         }
     
-    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行具体的数据分析任务"""
+    async def _execute_specific_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
+        """使用MetaGPT标准的Message历史执行数据分析任务"""
         logger.info(f"📊 {self.name} 开始执行任务: {task.description}")
+
+        # 从Message历史中提取数据内容
+        source_content = ""
+        if history_messages:
+            contents = []
+            for msg in history_messages:
+                if hasattr(msg, 'content') and msg.content:
+                    contents.append(f"### 来源: {msg.sent_from}\n\n{msg.content}")
+            source_content = "\n\n---\n\n".join(contents)
 
         # 简单的基于关键词的任务路由
         if "提取" in task.description and "数据" in task.description:
-            # 假设需要分析的内容在上下文中
-            source_content = ""
-            if context:
-                # 尝试从上下文的任何来源提取内容
-                for key, value in context.items():
-                    if isinstance(value, dict) and 'result' in value:
-                         # 优先使用上游任务的result字段
-                        res = value['result']
-                        if isinstance(res, dict) and 'content_preview' in res:
-                            source_content = res['content_preview']
-                            break
-                        elif isinstance(res, str):
-                            source_content = res
-                            break
-            
             if not source_content:
-                return {"status": "error", "result": "未在上下文中找到可供提取数据的内容"}
-
+                return {"status": "error", "result": "未在Message历史中找到可供提取数据的内容"}
             return await self._extract_data({"content": source_content, "data_type": "数值和关键信息"})
 
         elif "分析" in task.description and "数据" in task.description:
-            # 假设数据在上下文中
-            source_data = ""
-            if context:
-                 for key, value in context.items():
-                    if isinstance(value, dict) and 'result' in value:
-                        res = value['result']
-                        if isinstance(res, dict) and 'extracted_data' in res:
-                            source_data = res['extracted_data']
-                            break
-                        elif isinstance(res, str):
-                            source_data = res
-                            break
-            
-            if not source_data:
-                return {"status": "error", "result": "未在上下文中找到可供分析的数据"}
+            if not source_content:
+                return {"status": "error", "result": "未在Message历史中找到可供分析的数据"}
             
             analysis_type_match = re.search(r"进行(.*?)分析", task.description)
             analysis_type = analysis_type_match.group(1).strip() if analysis_type_match else "综合"
             
-            return await self._analyze_data({"data": source_data, "analysis_type": analysis_type})
+            return await self._analyze_data({"data": source_content, "analysis_type": analysis_type})
 
         else:
             return {"status": "completed", "result": f"已完成通用数据任务: {task.description}"}

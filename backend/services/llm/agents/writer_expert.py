@@ -1,11 +1,11 @@
 """
-写作专家Agent - 张翰
+写作专家Agent - 张翰 (React模式-内置决策核心)
 负责报告内容撰写和文本创作
 """
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 import json
 import re
 
@@ -15,54 +15,53 @@ from metagpt.logs import logger
 
 from .base import BaseAgent
 from backend.services.llm_provider import llm
-from backend.tools.summary_tool import summary_tool # 导入摘要工具
+# 导入公共工具
+from backend.tools.writing_tools import PolishContentAction, ReviewContentAction, SummarizeTextAction
 
 # 导入新的Prompt模块
 from backend.services.llm.prompts import writer_expert_prompts
 
 
-class ContentWritingAction(Action):
-    """内容写作动作"""
+class WritingAction(Action):
+    """
+    一项私有的、核心的写作能力。
+    输入：明确的写作指令，包含主题、章节、要求等。
+    输出：一段完整、高质量的报告章节草稿。
+    """
+    name: str = "WriteContent"
     
-    async def run(self, chapter: str, requirements: str, context: str = "") -> str:
-        """执行内容写作"""
-        prompt = writer_expert_prompts.get_section_writing_prompt(chapter, requirements, context, "张翰")
+    async def run(self, history_messages: List[Message], instruction: str = "", context_str: str = "") -> str:
+        """执行内容写作 - 符合MetaGPT标准"""
+        # 从history_messages中提取上下文（如果没有通过context_str提供）
+        if not context_str and history_messages:
+            contexts = []
+            for msg in history_messages:
+                if hasattr(msg, 'content') and msg.content:
+                    contexts.append(msg.content)
+            context_str = "\n\n".join(contexts)
+        
+        # 如果没有明确的instruction，尝试从最新消息中获取
+        if not instruction and history_messages:
+            latest_msg = history_messages[-1]
+            if hasattr(latest_msg, 'content'):
+                instruction = latest_msg.content[:200]  # 取前200字符作为指令
+        
+        prompt = writer_expert_prompts.get_section_writing_prompt(
+            section_title="根据指令写作", 
+            requirements=instruction, 
+            context=context_str, 
+            writer_name="张翰"
+        )
         try:
             return await llm.acreate_text(prompt)
         except Exception as e:
             logger.error(f"内容写作失败: {e}")
             return f"写作失败: {str(e)}"
 
-class ContentPolishAction(Action):
-    """内容润色动作 (新合并的能力)"""
-    async def run(self, content: str, style: str = "专业报告") -> str:
-        prompt = writer_expert_prompts.get_content_polish_prompt(content, style, "张翰")
-        try:
-            return await llm.acreate_text(prompt)
-        except Exception as e:
-            logger.error(f"内容润色失败: {e}")
-            return content
-
-class QualityReviewAction(Action):
-    """内容质量审核动作 (新合并的能力)"""
-    async def run(self, content: str) -> str:
-        prompt = writer_expert_prompts.get_quality_review_prompt(content, "张翰")
-        try:
-            return await llm.acreate_text(prompt)
-        except Exception as e:
-            logger.error(f"内容审核失败: {e}")
-            return json.dumps({"error": f"审核失败: {e}"})
-
-class SummarizeAction(Action):
-    """内容摘要动作 (新能力)"""
-    async def run(self, text_to_summarize: str) -> str:
-        # 这里可以直接调用summary_tool，也可以使用专属prompt，调用工具更符合解耦原则
-        return await summary_tool.run(text_to_summarize)
-
 
 class WriterExpertAgent(BaseAgent):
     """
-    ✍️ 写作专家（张翰） - 虚拟办公室的内容创作者、优化师和总结者
+    ✍️ 写作专家（张翰） - 具备内置决策能力的智能内容专家
     """
     def __init__(self, agent_id: str, session_id: str, workspace_path: str, memory_manager=None):
         super().__init__(
@@ -71,219 +70,116 @@ class WriterExpertAgent(BaseAgent):
             workspace_path=workspace_path,
             memory_manager=memory_manager,
             profile="写作专家",
-            goal="撰写、优化和总结高质量、结构清晰的报告内容"
+            goal="根据指令，智能地使用各种工具，完成高质量的内容创作、分析与优化任务"
         )
         
-        # 初始化写作工具和模板
-        self.writing_templates = self._load_writing_templates()
-        
-        # 设置专家信息
         self.name = "张翰"
-        self.avatar = "✍️"
-        self.expertise = "内容写作、润色、审核与总结"
         
-        # 设置动作 (合并了总编辑的能力)
-        self.set_actions([ContentWritingAction, ContentPolishAction, QualityReviewAction, SummarizeAction])
-        
-        # 创建写作工作目录
-        self.drafts_dir = self.agent_workspace / "drafts"
-        self.polished_dir = self.agent_workspace / "polished" # 原总编辑目录
-        self.reviews_dir = self.agent_workspace / "reviews"
-        self.summaries_dir = self.agent_workspace / "summaries" # 新增摘要目录
-        
-        for dir_path in [self.drafts_dir, self.polished_dir, self.reviews_dir, self.summaries_dir]:
-            dir_path.mkdir(exist_ok=True)
-        
-        logger.info(f"✍️ 写作专家 {self.name} 初始化完成，已整合总编辑能力。")
-
-    
-    def _load_writing_templates(self) -> Dict[str, str]:
-        """加载写作模板"""
-        return {
-            "standard_report": {
-                "structure": ["引言", "现状分析", "方案设计", "效益评估", "结论建议"],
-                "description": "标准项目报告模板"
-            },
-            "research_paper": {
-                "structure": ["摘要", "引言", "相关研究", "研究方法", "实验结果", "讨论", "结论"],
-                "description": "学术研究论文模板"
-            }
+        # 定义自己的"工具箱"，包含私有能力和公共工具
+        self.toolbox = {
+            "WriteContent": {"action": WritingAction(), "desc": "用于从零开始撰写全新的报告章节或段落。适用于任务明确要求'撰写'、'编写'新内容的场景。"},
+            "SummarizeText": {"action": SummarizeTextAction(), "desc": "用于对现有的大段文本进行总结、分析、整合和提炼关键信息。适用于任务要求'分析'、'总结'、'整合'、'提炼'的场景。"},
+            "PolishContent": {"action": PolishContentAction(), "desc": "用于对已有的草稿进行语言润色和风格优化。适用于任务要求'润色'、'优化'、'修改'的场景。"},
+            "ReviewContent": {"action": ReviewContentAction(), "desc": "用于从多个维度审核内容质量，并提供修改建议。适用于任务要求'审核'、'校对'、'评估质量'的场景。"}
         }
-    
-    async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行具体的写作或内容处理任务"""
-        logger.info(f"✍️ {self.name} 开始执行任务: {task.description}")
-
-        # 简单的基于关键词的任务路由
-        task_desc = task.description.lower()
         
-        # 提取上下文中的内容
+        self.drafts_dir = self.agent_workspace / "drafts"
+        self.summaries_dir = self.agent_workspace / "summaries"
+        self.polished_dir = self.agent_workspace / "polished"
+        self.reviews_dir = self.agent_workspace / "reviews"
+        for d in [self.drafts_dir, self.summaries_dir, self.polished_dir, self.reviews_dir]:
+            d.mkdir(exist_ok=True)
+            
+        logger.info(f"✍️ 写作专家 {self.name} 初始化完成，已启用内置决策核心。")
+
+    async def _execute_specific_task_with_messages(self, task: "Task", history_messages: List[Message]) -> Dict[str, Any]:
+        """
+        使用MetaGPT标准的Message历史执行任务：思考 -> 选择 -> 行动
+        """
+        logger.info(f"✍️ {self.name} 接收到任务: {task.description}")
+
+        # 1. 思考 (Think): 调用LLM进行决策
+        tool_name = await self._decide_tool(task.description)
+        if not tool_name or tool_name not in self.toolbox:
+            error_msg = f"决策失败：无法为任务 '{task.description}' 选择合适的工具。"
+            logger.error(error_msg)
+            return {"status": "error", "result": error_msg}
+
+        logger.info(f"🧠 {self.name} 决策选择工具: {tool_name}")
+        
+        # 2. 准备上下文 (Prepare Context) - 从Message历史中提取内容
         source_content = ""
-        if isinstance(context, dict):
-            # 聚合所有上游任务的结果内容
+        if history_messages:
             contents = []
-            for key, value in context.items():
-                if isinstance(value, dict) and 'result' in value:
-                    res = value['result']
-                    if isinstance(res, dict) and 'content' in res:
-                        contents.append(res['content'])
-                    elif isinstance(res, str):
-                        contents.append(res)
+            for msg in history_messages:
+                if hasattr(msg, 'content') and msg.content:
+                    contents.append(f"### 来源: {msg.sent_from}\n\n{msg.content}")
             source_content = "\n\n---\n\n".join(contents)
+                   
+        if not source_content and tool_name != "WriteContent":
+            return {"status": "error", "result": f"执行工具'{tool_name}'失败：未在Message历史中找到任何有效内容进行处理。"}
 
-        if not source_content and "撰写" not in task_desc:
-             # 对于需要输入内容的任务，检查source_content
-            if "润色" in task_desc or "优化" in task_desc or "审核" in task_desc or "总结" in task_desc or "摘要" in task_desc:
-                 return {"status": "error", "result": "未在上下文中找到可供处理的内容"}
-
-        if "润色" in task_desc or "优化" in task_desc:
-            style_match = re.search(r"按照(.*?)风格", task_desc)
-            style = style_match.group(1).strip() if style_match else "专业报告"
-            return await self._polish_content({"content": source_content, "style": style})
-
-        elif "审核" in task_desc or "校对" in task_desc:
-            return await self._review_content({"content": source_content})
-
-        elif "总结" in task_desc or "摘要" in task_desc:
-            return await self._summarize_content({"content": source_content})
+        # 3. 行动 (Act): 执行选定的工具
+        try:
+            selected_action = self.toolbox[tool_name]["action"]
             
-        elif "撰写" in task_desc:
-            # 这里的上下文可能更多是作为参考，而不是直接处理对象
-            return await self._write_content(task, source_content)
+            # 不同的工具可能需要不同的参数
+            if tool_name == "WriteContent":
+                # MetaGPT标准：Action.run接收history messages
+                result_content = await selected_action.run(history_messages, instruction=task.description, context_str=source_content)
+                output_dir = self.drafts_dir
+                file_prefix = "draft"
+            else: 
+                # 对于其他工具，传递source_content
+                result_content = await selected_action.run(history_messages, source_content)
+                if tool_name == "SummarizeText":
+                    output_dir = self.summaries_dir
+                    file_prefix = "summary"
+                elif tool_name == "PolishContent":
+                    output_dir = self.polished_dir
+                    file_prefix = "polished"
+                else: 
+                    output_dir = self.reviews_dir
+                    file_prefix = "review"
+
+            # 保存产出物
+            safe_desc = "".join(c if c.isalnum() else '_' for c in task.description)[:50]
+            output_file = output_dir / f"{file_prefix}_{safe_desc}_{datetime.now().strftime('%H%M%S')}.md"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(result_content)
+
+            return {
+                'status': 'completed',
+                'result': {
+                    "message": f"已使用工具 '{tool_name}' 完成任务 '{task.description}'",
+                    "files_created": [output_file.name],
+                    "content": result_content
+                }
+            }
+        except Exception as e:
+            error_msg = f"执行工具 '{tool_name}' 时发生错误: {e}"
+            logger.error(error_msg, exc_info=True)
+            return {"status": "error", "result": error_msg}
+
+    async def _decide_tool(self, instruction: str) -> str:
+        """调用LLM来决定使用哪个工具"""
+        tools_description = "\n".join([f"- {name}: {info['desc']}" for name, info in self.toolbox.items()])
+        prompt = writer_expert_prompts.get_tool_selection_prompt(instruction, tools_description, self.name)
         
-        else:
-            # 默认当作一个写作任务处理
-            logger.warning(f"无法精确匹配任务 '{task.description}'，将按默认写作任务处理。")
-            return await self._write_content(task, source_content)
-
-
-    async def _write_content(self, task: "Task", context_str: str) -> Dict[str, Any]:
-        """撰写新内容"""
         try:
-            # 简化：直接使用task.description作为写作要求
-            requirements = task.description
-            # 章节标题可以从task.description中提取，或使用task.id
-            chapter = f"章节_{task.id}"
-
-            self.current_task = f"正在撰写: {chapter}"
-            self.progress = 10
+            response_json_str = await llm.acreate_text(prompt)
+            match = re.search(r"```json\s*([\s\S]*?)\s*```", response_json_str)
+            if match:
+                json_str = match.group(1)
+            else:
+                json_str = response_json_str
             
-            writing_action = ContentWritingAction()
-            content = await writing_action.run(chapter=chapter, requirements=requirements, context=context_str)
-            
-            self.progress = 90
-            
-            draft_file = self.drafts_dir / f"draft_{chapter}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(draft_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            self.progress = 100
-            
-            return {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': f"已完成 '{chapter}' 的草稿撰写",
-                'files_created': [draft_file.name],
-                'content': content,
-            }
+            decision = json.loads(json_str)
+            return decision.get("tool_name")
         except Exception as e:
-            logger.error(f"❌ {self.name} 内容撰写失败: {e}", exc_info=True)
-            return {"status": "error", "result": f"内容撰写失败: {e}"}
-
-    async def _polish_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """润色内容 (原总编辑能力)"""
-        try:
-            content = task.get('content', '')
-            style = task.get('style', '专业报告')
+            logger.error(f"工具决策LLM调用失败: {e}")
+            return None
             
-            self.current_task = f"正在润色内容，风格：{style}"
-            self.progress = 10
-            
-            polish_action = ContentPolishAction()
-            polished_content = await polish_action.run(content, style)
-            
-            self.progress = 80
-            
-            polish_file = self.polished_dir / f"polished_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(polish_file, 'w', encoding='utf-8') as f:
-                f.write(polished_content)
-            
-            self.progress = 100
-            
-            return {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': f"已完成内容润色，风格调整为{style}",
-                'files_created': [polish_file.name],
-                'content': polished_content, # 返回润色后的内容
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ {self.name} 内容润色失败: {e}", exc_info=True)
-            return {"status": "error", "result": f"内容润色失败: {e}"}
-
-    async def _review_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """审核内容 (原总编辑能力)"""
-        try:
-            content = task.get('content', '')
-            
-            self.current_task = "正在进行内容质量审核"
-            self.progress = 10
-            
-            review_action = QualityReviewAction()
-            review_result = await review_action.run(content)
-            
-            self.progress = 80
-            
-            review_file = self.reviews_dir / f"review_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(review_file, 'w', encoding='utf-8') as f:
-                f.write(f"# 内容审核报告\n\n{review_result}")
-            
-            self.progress = 100
-            
-            return {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': "已完成内容质量审核",
-                'files_created': [review_file.name],
-                'review': review_result,
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ {self.name} 内容审核失败: {e}", exc_info=True)
-            return {"status": "error", "result": f"内容审核失败: {e}"}
-
-    async def _summarize_content(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """总结内容"""
-        try:
-            content = task.get('content', '')
-            self.current_task = "正在生成内容摘要"
-            self.progress = 10
-            
-            summarize_action = SummarizeAction()
-            summary_text = await summarize_action.run(content)
-
-            self.progress = 80
-
-            summary_file = self.summaries_dir / f"summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            with open(summary_file, 'w', encoding='utf-8') as f:
-                f.write(summary_text)
-
-            self.progress = 100
-            
-            return {
-                'agent_id': self.agent_id,
-                'status': 'completed',
-                'result': "已完成内容摘要生成",
-                'files_created': [summary_file.name],
-                'content': summary_text, # 将摘要作为主要内容返回
-            }
-
-        except Exception as e:
-            logger.error(f"❌ {self.name} 内容摘要失败: {e}", exc_info=True)
-            return {"status": "error", "result": f"内容摘要失败: {e}"}
-
-
     async def get_work_summary(self) -> str:
         """获取工作摘要"""
         try:
@@ -305,4 +201,4 @@ class WriterExpertAgent(BaseAgent):
             return summary
             
         except Exception as e:
-            return f"✍️ {self.name}: 工作摘要获取失败 - {str(e)}" 
+            return f"✍️ {self.name}: 工作摘要获取失败 - {str(e)}"

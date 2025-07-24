@@ -15,6 +15,9 @@ from backend.models.plan import Plan, Task
 from metagpt.llm import LLM
 import re
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import director_prompts
+
 
 class DirectorAgent(BaseAgent):
     """
@@ -105,59 +108,12 @@ class DirectorAgent(BaseAgent):
         context_summary = self._memory_adapter.get_conversation_history(limit=10)
         formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in context_summary])
 
-        prompt = f"""
-# 指令
-作为一名世界级的AI项目总监，你的任务是将用户的模糊需求，结合对话历史，转化为一个清晰、结构化的JSON格式的行动计划（Plan）。
-
-## 1. 上下文
-**对话历史:**
-{formatted_history}
-
-**最新用户需求:**
-{user_message}
-
-**可用专家能力:**
-{json.dumps(self.agent_capabilities, ensure_ascii=False, indent=2)}
-
-## 2. 你的任务
-你需要输出一个JSON对象，该对象遵循Plan和Task的数据模型。
-
-- `goal`: 必须是对用户核心目标的精准概括。
-- `tasks`: 一个有序的列表，每个task代表一个为实现goal所需执行的、不可再分的原子步骤。
-  - `description`: 必须清晰地描述这个任务“做什么”，语言应面向将要执行它的专家。
-  - `dependencies`: 如果一个任务需要等待其他任务完成，在这里列出其依赖的任务`id`。任务`id`应为`task_1`, `task_2`等，方便引用。
-
-## 3. 核心原则
-- **What, not How**: `description`只描述做什么，不操心怎么做或谁来做。
-- **原子性**: 每个Task都应该是最小的可执行单元。例如，不要创建“撰写报告”这种大任务，应拆分为“分析数据”、“撰写初稿”、“审核内容”等。
-- **逻辑性**: 任务列表必须逻辑有序。如果B任务依赖A任务的结果，B必须在A之后，并通过`dependencies`字段声明。
-- **全面性**: 计划需要覆盖从开始到结束的所有必要步骤，确保最终能完整地响应用户需求。
-- **简单任务处理**: 如果用户只是提问或咨询，计划可以只包含一个任务，如 `description: "回答用户关于写作技巧的问题"`。
-- **具体化**: 对于搜索任务，`description`必须是一个具体的查询语句，而不是泛化的描述。例如，"搜索关于Python编程的最新趋势" 比 "搜索最新趋势" 更具体。
-
-## 4. 输出格式
-你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
-
-```json
-{{
-  "goal": "用户的核心目标",
-  "tasks": [
-    {{
-      "id": "task_1",
-      "description": "第一个原子任务的清晰描述",
-      "dependencies": []
-    }},
-    {{
-      "id": "task_2",
-      "description": "第二个原子任务的清晰描述",
-      "dependencies": ["task_1"]
-    }}
-  ]
-}}
-```
-
-现在，请为用户的最新需求生成行动计划。
-"""
+        # 使用新的Prompt模块
+        prompt = director_prompts.get_plan_generation_prompt(
+            formatted_history=formatted_history,
+            user_message=user_message,
+            agent_capabilities=self.agent_capabilities
+        )
         
         response_json_str = await self.llm.aask(prompt)
         
@@ -197,55 +153,13 @@ class DirectorAgent(BaseAgent):
         context_summary = self._memory_adapter.get_conversation_history(limit=10)
         formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in context_summary])
 
-        prompt = f"""
-# 指令
-作为一名世界级的AI项目总监，你的任务是根据用户的反馈，修订一个已有的行动计划。
-
-## 1. 上下文
-**对话历史:**
-{formatted_history}
-
-**原始计划:**
-```json
-{original_plan.model_dump_json(indent=2)}
-```
-
-**用户最新反馈/修改意见:**
-{user_feedback}
-
-**可用专家能力:**
-{json.dumps(self.agent_capabilities, ensure_ascii=False, indent=2)}
-
-## 2. 你的任务
-你需要输出一个**全新的、修订后的**JSON格式的行动计划（Plan）。
-
-- **整合反馈**: 新计划必须充分整合用户的修改意见。例如，如果用户要求“在第2步之前增加一个数据清洗步骤”，你就必须添加这个新任务并调整后续任务的依赖关系。
-- **重新思考**: 不要只做简单的增删。要像一个真正的项目总监一样，思考用户的反馈对整个计划的逻辑和流程意味着什么，并进行系统性的优化。
-- **保持原则**: 同样要遵循 **What, not How**、**原子性**、**逻辑性** 和 **全面性** 的原则。
-
-## 3. 输出格式
-你必须严格按照下面的JSON格式输出，不要有任何多余的文字。
-
-```json
-{{
-  "goal": "（可能是修订后的）用户核心目标",
-  "tasks": [
-    {{
-      "id": "task_1",
-      "description": "第一个原子任务的清晰描述",
-      "dependencies": []
-    }},
-    {{
-      "id": "task_2",
-      "description": "第二个原子任务的清晰描述",
-      "dependencies": ["task_1"]
-    }}
-  ]
-}}
-```
-
-现在，请生成修订后的行动计划。
-"""
+        # 使用新的Prompt模块
+        prompt = director_prompts.get_plan_revision_prompt(
+            formatted_history=formatted_history,
+            original_plan=original_plan,
+            user_feedback=user_feedback,
+            agent_capabilities=self.agent_capabilities
+        )
         
         response_json_str = await self.llm.aask(prompt)
         
@@ -281,40 +195,17 @@ class DirectorAgent(BaseAgent):
         formatted_history = "\n".join([f"{msg.get('role')}: {msg.get('content')}" for msg in history])
         
         # 2. 根据不同意图，构建不同的prompt
+        team_summary = None
         if intent == 'status_inquiry':
-            # 对于状态查询，需要获取工作区状态
-            # (这是一个简化版，实际可以做的更复杂，比如从planner获取执行进度)
             team_summary = self._memory_adapter.get_team_summary()
-            status_context = json.dumps(team_summary, ensure_ascii=False, indent=2)
             
-            prompt = f"""
-# 指令：作为AI项目总监，根据上下文和当前项目状态，回答用户的状态查询。
-
-## 对话历史
-{formatted_history}
-
-## 当前项目状态摘要
-{status_context}
-
-## 用户问题
-"{user_message}"
-
----
-请用人性化的语言，清晰地回答用户关于项目进展的问题。
-"""
-        else: #  trivial_chat, simple_qa, contextual_follow_up
-            prompt = f"""
-# 指令：作为AI项目总监，根据上下文，用人性化、专业的语言回答用户的问题。
-
-## 对话历史
-{formatted_history}
-
-## 用户最新消息
-"{user_message}"
-
----
-请直接回答用户。如果是闲聊，请礼貌回应；如果是问题，请提供简洁、准确的答案；如果是追问，请结合上下文进行解释。
-"""
+        # 使用新的Prompt模块
+        prompt = director_prompts.get_direct_answer_prompt(
+            formatted_history=formatted_history,
+            user_message=user_message,
+            intent=intent,
+            team_summary=team_summary
+        )
             
         # 3. 调用LLM生成答案
         answer = await self.llm.aask(prompt)

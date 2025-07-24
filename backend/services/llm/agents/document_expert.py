@@ -17,6 +17,9 @@ from .base import BaseAgent
 from backend.services.llm_provider import llm
 from backend.tools.mineru_api_tool import mineru_tool
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import document_expert_prompts
+
 class DocumentProcessAction(Action):
     """文档处理动作"""
     
@@ -36,17 +39,9 @@ class DocumentSummaryAction(Action):
     
     async def run(self, filename: str, content: str) -> str:
         """生成文档摘要"""
-        prompt = f"""
-你是李心悦，一位专业的办公室文秘和文档管理专家。请为以下文档生成简洁的摘要：
-
-文档名称：{filename}
-文档内容（前4000字符）：
----
-{content[:4000]}
----
-
-请用1-2句话总结这份文档的主要内容和关键信息。
-"""
+        # 使用新的Prompt模块
+        prompt = document_expert_prompts.get_document_summary_prompt(filename, content, "李心悦")
+        
         try:
             summary = await llm.acreate_text(prompt)
             return summary.strip()
@@ -123,46 +118,13 @@ class DocumentExpertAgent(BaseAgent):
 
     def _get_summarize_prompt(self, filename: str, content: str) -> str:
         """构建文档摘要提示词"""
-        return f"""
-你是李心悦，一位专业的办公室文秘和文档管理专家。你需要为项目总监快速总结这份文档的核心内容。
-
-文档名称：{filename}
-文档内容（前4000字符）：
----
-{content[:4000]}
----
-
-请以专业文秘的角度，用1-2句话总结这份文档的：
-1. 主要内容或目的
-2. 关键数据或重要信息点
-
-格式示例：
-"这是一份关于XX项目的实施方案，详细规定了三个阶段的工作内容和时间安排，预算总额为XX万元。"
-
-请直接给出摘要，不要添加其他说明。
-"""
+        # 使用新的Prompt模块
+        return document_expert_prompts.get_document_summary_prompt(filename, content, self.name)
 
     def _get_key_info_prompt(self, filename: str, content: str) -> str:
         """构建关键信息提取提示词"""
-        return f"""
-你是李心悦，办公室文档管理专家。请从以下文档中提取关键信息，为项目团队提供结构化的信息摘要。
-
-文档：{filename}
-内容：
----
-{content[:6000]}
----
-
-请提取以下关键信息（如果文档中包含的话）：
-1. 重要日期和时间节点
-2. 关键数字和数据
-3. 主要负责人或联系方式
-4. 重要政策条款或规定
-5. 预算或费用信息
-6. 工作流程或步骤
-
-请以清晰的列表格式输出，如果某项信息不存在，请标注"未提及"。
-"""
+        # 使用新的Prompt模块
+        return document_expert_prompts.get_key_info_extraction_prompt(filename, content, self.name)
 
     async def _execute_specific_task(self, task: "Task", context: Dict[str, Any]) -> Dict[str, Any]:
         """

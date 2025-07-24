@@ -15,6 +15,9 @@ from metagpt.logs import logger
 from backend.services.llm.agents.base import BaseAgent
 from backend.tools.alibaba_search import AlibabaSearchTool
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import case_expert_prompts
+
 
 class CaseSearchAction(Action):
     """案例搜索动作"""
@@ -304,29 +307,38 @@ class CaseExpertAgent(BaseAgent):
 
     async def _generate_search_summary(self, search_results: List[Dict]) -> str:
         """生成搜索结果摘要"""
-        summary = f"# 案例搜索摘要报告\n\n"
-        summary += f"**搜索专家**: {self.name}\n"
-        summary += f"**搜索时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        summary += f"**搜索查询数**: {len(search_results)}\n\n"
+        # 使用新的Prompt模块
+        prompt = case_expert_prompts.get_search_summary_prompt(search_results, self.name)
         
-        summary += "## 搜索概览\n\n"
-        for i, result in enumerate(search_results, 1):
-            summary += f"{i}. **{result['query']}**\n"
-            summary += f"   - 结果文件: {result['file']}\n"
-            summary += f"   - 内容预览: {result['results'][:100]}...\n\n"
-        
-        summary += "## 主要发现\n\n"
-        summary += "- 收集了多个相关案例和最佳实践\n"
-        summary += "- 涵盖了不同领域的实施经验\n"
-        summary += "- 为报告撰写提供了丰富的参考资料\n\n"
-        
-        summary += "## 后续建议\n\n"
-        summary += "1. 对搜索结果进行深入分析\n"
-        summary += "2. 提取关键成功因素\n"
-        summary += "3. 整理可借鉴的经验做法\n"
-        summary += "4. 为报告撰写提供案例支撑\n\n"
-        
-        return summary
+        try:
+            # 这里需要调用LLM，但CaseExpertAgent没有直接的LLM实例
+            # 暂时使用简单的文本生成
+            summary = f"# 案例搜索摘要报告\n\n"
+            summary += f"**搜索专家**: {self.name}\n"
+            summary += f"**搜索时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            summary += f"**搜索查询数**: {len(search_results)}\n\n"
+            
+            summary += "## 搜索概览\n\n"
+            for i, result in enumerate(search_results, 1):
+                summary += f"{i}. **{result['query']}**\n"
+                summary += f"   - 结果文件: {result['file']}\n"
+                summary += f"   - 内容预览: {result['results'][:100]}...\n\n"
+            
+            summary += "## 主要发现\n\n"
+            summary += "- 收集了多个相关案例和最佳实践\n"
+            summary += "- 涵盖了不同领域的实施经验\n"
+            summary += "- 为报告撰写提供了丰富的参考资料\n\n"
+            
+            summary += "## 后续建议\n\n"
+            summary += "1. 对搜索结果进行深入分析\n"
+            summary += "2. 提取关键成功因素\n"
+            summary += "3. 整理可借鉴的经验做法\n"
+            summary += "4. 为报告撰写提供案例支撑\n\n"
+            
+            return summary
+        except Exception as e:
+            logger.error(f"生成搜索摘要失败: {e}")
+            return f"搜索摘要生成失败: {str(e)}"
 
     async def get_work_summary(self) -> str:
         """获取工作摘要"""

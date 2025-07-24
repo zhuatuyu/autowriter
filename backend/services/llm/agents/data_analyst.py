@@ -16,25 +16,18 @@ from metagpt.logs import logger
 from .base import BaseAgent
 from backend.services.llm_provider import llm
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import data_analyst_prompts
+
 
 class DataExtractionAction(Action):
     """数据提取动作"""
     
     async def run(self, content: str, data_type: str = "数值数据") -> str:
         """从内容中提取数据"""
-        prompt = f"""
-你是数据分析师赵丽娅，请从以下内容中提取{data_type}：
-
-内容：
-{content}
-
-请提取所有相关的数据，包括：
-1. 数值数据（金额、百分比、数量等）
-2. 时间数据（日期、期间等）
-3. 分类数据（类别、等级等）
-
-以结构化的格式输出，便于后续分析。
-"""
+        # 使用新的Prompt模块
+        prompt = data_analyst_prompts.get_data_extraction_prompt(content, data_type, "赵丽娅")
+        
         try:
             extracted_data = await llm.acreate_text(prompt)
             return extracted_data.strip()
@@ -48,21 +41,9 @@ class DataAnalysisAction(Action):
     
     async def run(self, data: str, analysis_type: str = "趋势分析") -> str:
         """分析数据并生成报告"""
-        prompt = f"""
-你是专业的数据分析师赵丽娅，请对以下数据进行{analysis_type}：
-
-数据：
-{data}
-
-请提供：
-1. 数据概览和基本统计
-2. 主要趋势和模式
-3. 关键发现和洞察
-4. 数据质量评估
-5. 分析结论和建议
-
-请用专业的数据分析语言，提供清晰的分析结果。
-"""
+        # 使用新的Prompt模块
+        prompt = data_analyst_prompts.get_data_analysis_prompt(data, analysis_type, "赵丽娅")
+        
         try:
             analysis_result = await llm.acreate_text(prompt)
             return analysis_result.strip()

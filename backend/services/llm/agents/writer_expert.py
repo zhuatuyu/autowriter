@@ -16,27 +16,18 @@ from metagpt.logs import logger
 from .base import BaseAgent
 from backend.services.llm_provider import llm
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import writer_expert_prompts
+
 
 class ContentWritingAction(Action):
     """内容写作动作"""
     
     async def run(self, chapter: str, requirements: str, context: str = "") -> str:
         """执行内容写作"""
-        prompt = f"""
-你是一位顶级的报告写作专家（张翰），擅长将零散的信息整合成结构清晰、文笔流畅的专业报告章节。
-
-## 任务
-撰写报告的 **{chapter}** 章节。
-
-## 要求
-{requirements}
-
-## 可用材料/上下文
-{context}
-
----
-请严格按照要求，仅输出该章节的Markdown格式的正文内容。
-"""
+        # 使用新的Prompt模块
+        prompt = writer_expert_prompts.get_section_writing_prompt(chapter, requirements, context, "张翰")
+        
         try:
             content = await llm.acreate_text(prompt)
             return content.strip()
@@ -50,17 +41,9 @@ class ContentReviewAction(Action):
     
     async def run(self, content: str, requirements: str) -> str:
         """审核和优化内容"""
-        prompt = f"""
-你是写作专家张翰，请审核以下内容并进行优化：
-
-原始内容：
-{content}
-
-要求：
-{requirements}
-
-请优化内容的结构、逻辑和表达，确保符合专业报告的标准。
-"""
+        # 使用新的Prompt模块
+        prompt = writer_expert_prompts.get_content_optimization_prompt(content, "专业报告", "张翰")
+        
         try:
             optimized_content = await llm.acreate_text(prompt)
             return optimized_content.strip()

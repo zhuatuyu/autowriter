@@ -15,27 +15,18 @@ from metagpt.logs import logger
 from .base import BaseAgent
 from backend.services.llm_provider import llm
 
+# 导入新的Prompt模块
+from backend.services.llm.prompts import chief_editor_prompts
+
 
 class ContentReviewAction(Action):
     """内容审核动作"""
     
     async def run(self, content: str, review_type: str = "全面审核") -> str:
         """审核内容质量"""
-        prompt = f"""
-你是总编辑钱敏，拥有丰富的编辑经验和敏锐的质量把控能力。请对以下内容进行{review_type}：
-
-内容：
-{content}
-
-请从以下角度进行审核：
-1. **内容准确性**: 事实是否准确，逻辑是否清晰
-2. **结构完整性**: 结构是否合理，层次是否分明
-3. **语言表达**: 文字是否流畅，表达是否准确
-4. **格式规范**: 格式是否统一，标准是否符合要求
-5. **整体质量**: 是否达到发布标准
-
-请提供具体的修改建议和优化方案。
-"""
+        # 使用新的Prompt模块
+        prompt = chief_editor_prompts.get_content_review_prompt(content, review_type, "钱敏")
+        
         try:
             review_result = await llm.acreate_text(prompt)
             return review_result.strip()
@@ -49,21 +40,9 @@ class ContentPolishAction(Action):
     
     async def run(self, content: str, style: str = "专业报告") -> str:
         """润色和优化内容"""
-        prompt = f"""
-你是总编辑钱敏，请对以下内容进行专业润色，使其符合{style}的标准：
-
-原始内容：
-{content}
-
-请进行以下优化：
-1. 提升语言表达的专业性和准确性
-2. 优化句式结构，增强可读性
-3. 统一术语使用，确保一致性
-4. 完善逻辑连接，增强连贯性
-5. 调整格式，符合专业标准
-
-请直接输出润色后的内容。
-"""
+        # 使用新的Prompt模块
+        prompt = chief_editor_prompts.get_content_polish_prompt(content, style, "钱敏")
+        
         try:
             polished_content = await llm.acreate_text(prompt)
             return polished_content.strip()
@@ -77,21 +56,9 @@ class QualityAssuranceAction(Action):
     
     async def run(self, content: str) -> Dict[str, Any]:
         """进行质量检查"""
-        prompt = f"""
-你是总编辑钱敏，请对以下内容进行质量检查，并给出质量评分：
-
-内容：
-{content}
-
-请从以下维度评分（1-10分）：
-1. 内容完整性
-2. 逻辑清晰度
-3. 语言流畅度
-4. 格式规范性
-5. 专业水准
-
-请以JSON格式返回评分结果和改进建议。
-"""
+        # 使用新的Prompt模块
+        prompt = chief_editor_prompts.get_quality_assurance_prompt(content, "钱敏")
+        
         try:
             quality_result = await llm.acreate_text(prompt)
             return {'quality_check': quality_result.strip()}

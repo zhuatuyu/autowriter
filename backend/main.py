@@ -18,6 +18,7 @@ from backend.services.orchestrator import orchestrator
 print("🚀 Using Core Manager")
 
 from backend.services.websocket_manager import WebSocketManager
+from backend.services.api import router as workspace_router
 
 app = FastAPI(title="AutoWriter Enhanced", version="1.0.0")
 
@@ -32,6 +33,9 @@ app.add_middleware(
 
 # 全局管理器
 websocket_manager = WebSocketManager()
+
+# 注册工作区API路由
+app.include_router(workspace_router)
 
 @app.get("/")
 async def root():

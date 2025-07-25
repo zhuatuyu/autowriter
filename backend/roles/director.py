@@ -87,7 +87,7 @@ class DirectorAgent(BaseAgent):
             match = re.search(r"```json\n(.*?)\n```", plan_json_str, re.DOTALL)
             if match:
                 plan_json_str = match.group(1)
-            
+
             plan_data = json.loads(plan_json_str)
             
             # 使用Pydantic模型进行验证
@@ -118,7 +118,7 @@ class DirectorAgent(BaseAgent):
             agent_name = agent_name_map.get(task.agent, task.agent)
             response += f"{i}. @{agent_name} {task.description}\n"
         return response
-    
+
     async def direct_answer(self, user_message: str, intent: str) -> str:
         """
         直接回答用户的简单问题 (保留此方法以兼容现有调用)

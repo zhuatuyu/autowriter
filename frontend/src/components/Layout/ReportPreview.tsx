@@ -66,7 +66,7 @@ const ReportPreview: React.FC = () => {
         </div>
         
         {currentReport && (
-          <div className="text-sm text-gray-500">
+          <div className="text-sm text-gray-500 truncate">
             {currentReport.title}
           </div>
         )}

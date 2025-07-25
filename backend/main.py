@@ -14,7 +14,7 @@ from pathlib import Path
 
 from backend.models.session import WorkSession, AgentMessage
 # 使用新的核心管理器
-from backend.services.orchestrator import core_manager
+from backend.services.orchestrator import orchestrator
 print("🚀 Using Core Manager")
 
 from backend.services.websocket_manager import WebSocketManager
@@ -71,7 +71,7 @@ async def create_session(project_info: dict):
 async def list_sessions():
     """获取会话列表"""
     try:
-        sessions = core_manager.get_all_sessions()
+        sessions = orchestrator.get_all_sessions()
         return {"sessions": sessions}
     except Exception as e:
         return {"sessions": [], "error": str(e)}
@@ -128,7 +128,7 @@ async def list_projects():
 async def get_agents_status(session_id: str):
     """获取指定会话的所有Agent状态"""
     try:
-        session_status = await core_manager.get_session_status(session_id)
+        session_status = await orchestrator.get_session_status(session_id)
         if 'error' in session_status:
             return {"agents": [], "error": session_status['error']}
         
@@ -195,29 +195,29 @@ async def handle_user_intervention(session_id: str, message: dict):
     # })
     
     # 检查是否需要启动分析
-    session_status = await core_manager.get_session_status(session_id)
+    session_status = await orchestrator.get_session_status(session_id)
     if 'error' in session_status:
         print(f"🚀 Detected new session, starting workflow for user message in session {session_id}")
         # 启动新的工作会话
-        await core_manager.start_session(session_id)
-        await core_manager.handle_user_message(session_id, user_message, websocket_manager)
+        await orchestrator.start_session(session_id)
+        await orchestrator.handle_user_message(session_id, user_message, websocket_manager)
     else:
         # 如果已经有活跃会话，作为用户输入处理
-        await core_manager.handle_user_intervention(session_id, user_message, websocket_manager)
+        await orchestrator.handle_user_intervention(session_id, user_message, websocket_manager)
 
 async def start_agent_analysis(session_id: str, message: dict):
     """启动Agent分析流程"""
     project_info = message.get("project_info", {})
     
     # 检查是否已经在运行分析
-    session_status = await core_manager.get_session_status(session_id)
+    session_status = await orchestrator.get_session_status(session_id)
     if 'error' not in session_status and session_status.get("status") == "active":
         print(f"Analysis already started for session {session_id}, ignoring duplicate request")
         return
     
     # 启动工作流程
-    await core_manager.start_session(session_id, project_info)
-    await core_manager.handle_user_message(session_id, "开始分析", websocket_manager)
+    await orchestrator.start_session(session_id, project_info)
+    await orchestrator.handle_user_message(session_id, "开始分析", websocket_manager)
 
 @app.post("/api/upload/{session_id}")
 async def upload_file(session_id: str, file: UploadFile = File(...)):
@@ -238,7 +238,7 @@ async def upload_file(session_id: str, file: UploadFile = File(...)):
 
         # 通知项目总监有新文件
         user_message = f"用户上传了新文件 '{file.filename}'，已存入文档专家工作区，请您指示处理。"
-        await core_manager.handle_user_message(session_id, user_message, websocket_manager)
+        await orchestrator.handle_user_message(session_id, user_message, websocket_manager)
 
         return {"status": "success", "filename": file.filename, "location": str(file_location)}
     except Exception as e:
@@ -333,7 +333,7 @@ async def simple_test(session_id: str):
 async def get_workflow_status(session_id: str):
     """获取工作流程状态"""
     try:
-        summary = await core_manager.get_session_status(session_id)
+        summary = await orchestrator.get_session_status(session_id)
         return {"status": "success", "data": summary}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -343,7 +343,7 @@ async def post_user_intervention(session_id: str, request: dict):
     """POST方式处理用户介入"""
     try:
         message = request.get("message", "")
-        await core_manager.handle_user_intervention(session_id, message, websocket_manager)
+        await orchestrator.handle_user_intervention(session_id, message, websocket_manager)
         return {"status": "success", "message": "用户介入已处理"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -359,8 +359,8 @@ async def start_intelligent_workflow(request: dict):
         print(f"🧠 启动智能项目总监工作流程: {session_id}")
         
         # 启动智能项目总监工作流程
-        await core_manager.start_session(session_id)
-        await core_manager.handle_user_message(session_id, "启动智能项目总监工作流程", websocket_manager)
+        await orchestrator.start_session(session_id)
+        await orchestrator.handle_user_message(session_id, "启动智能项目总监工作流程", websocket_manager)
         
         return {
             "status": "success", 
@@ -383,8 +383,8 @@ async def start_iterative_workflow(request: dict):
         print(f"🎯 启动迭代式工作流程: {session_id}")
         
         # 启动迭代式工作流程
-        await core_manager.start_session(session_id)
-        await core_manager.handle_user_message(session_id, "启动迭代式工作流程", websocket_manager)
+        await orchestrator.start_session(session_id)
+        await orchestrator.handle_user_message(session_id, "启动迭代式工作流程", websocket_manager)
         
         return {
             "status": "success", 

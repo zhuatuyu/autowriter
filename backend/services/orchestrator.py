@@ -18,6 +18,7 @@ from backend.services.websocket_manager import WebSocketManager
 from backend.models.session import SessionState  # 引入会话状态枚举
 from backend.models.plan import Plan, Task  # 引入Plan和Task模型
 from metagpt.schema import Message  # 引入MetaGPT的Message类
+from metagpt.logs import logger  # 引入MetaGPT的日志记录器
 
 # 导入新的Prompt模块
 from backend.prompts import core_manager_prompts
@@ -30,7 +31,7 @@ AGENT_TEAM_CONFIG = {
     'data_analyst': DataAnalystAgent,
 }
 
-class CoreManager:
+class Orchestrator:
     """核心协调器 (Orchestrator) - 基于状态机管理多智能体协作"""
     
     def __init__(self):
@@ -119,9 +120,8 @@ class CoreManager:
             agents[director.agent_id] = director
             print(f"  ✅ 创建Agent: {director.profile} ({director.role})")
 
-            # 2. Planner不再需要，其职责由CoreManager(Orchestrator)承担
-            
-            # 3. 创建专业Agent团队
+
+            # 2. 创建专业Agent团队
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
                 agent_workspace = Path(workspace_path) / agent_id
                 agent = agent_class(
@@ -359,7 +359,6 @@ class CoreManager:
         print(f"🚀 {session_id} Orchestrator 开始执行计划: {plan.goal}")
         session_context = self.sessions_context[session_id]
         
-        # 用于在任务间传递上下文
         # 初始上下文是用户最开始的请求
         last_message = Message(content=plan.goal, role="user", cause_by="user_request")
 
@@ -375,25 +374,14 @@ class CoreManager:
             await websocket_manager.broadcast_agent_message(session_id, agent.agent_id, agent.name, f"正在执行任务: {task.description}", "working")
             
             try:
-                # 准备执行Action的上下文
-                # 将上一个任务的结果作为当前任务的输入
-                agent.rc.memory.add(last_message)
-                
-                # 让Agent自己决定使用哪个Action
-                # (这是一个简化的决策，实际可以更复杂)
-                # MetaGPT的React机制会自动选择最合适的Action
-                # 我们这里手动模拟一下：让它选择第一个可用的Action
-                if not agent.actions:
-                     error_msg = f"执行者 '{agent.name}' 没有任何已注册的Action。"
-                     return {"status": "error", "error": error_msg}
+                # 按照MetaGPT标准做法：直接调用 agent.run(task.description)
+                # 让 Role 自己管理内存和 Action 流程
+                result_message = await agent.run(task.description)
 
-                # TODO: 实现一个基于任务描述的智能Action选择机制
-                # 临时策略：使用第一个Action
-                action_to_run = agent.actions[0]
-                agent.rc.todo = action_to_run
-
-                # 调用标准的_act方法
-                result_message = await agent._act()
+                if not result_message:
+                    logger.error(f"任务 {task.task_id} '{task.description}' 执行后没有返回结果消息。")
+                    error_message = f"任务 {task.task_id} 执行异常，智能体未返回结果。"
+                    break
                 
                 # 更新上下文，用于下一个任务
                 last_message = result_message
@@ -561,5 +549,7 @@ class CoreManager:
         return self.session_states.get(session_id, SessionState.IDLE)
 
 
-# 全局核心管理器实例
-core_manager = CoreManager()
+
+
+# 全局协调器实例
+orchestrator = Orchestrator()

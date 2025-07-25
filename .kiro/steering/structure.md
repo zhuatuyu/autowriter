@@ -14,32 +14,50 @@ autowriter/
 └── test_*.py             # Architecture and workflow tests
 ```
 
-## Backend Structure (`backend/`) - 虚拟办公环境架构
+## Backend Structure (`backend/`) - MetaGPT对齐的虚拟办公环境架构
 
 ```
 backend/
 ├── main.py                    # FastAPI application entry point
-├── models/                    # Data models and schemas
-│   └── session.py            # Session, Agent, and workflow models
-├── services/                  # 核心基础设施层 (稳定层)
-│   ├── core_manager.py        # 核心管理器 - Agent团队协调
-│   ├── llm_provider.py        # LLM提供者 - 统一AI接口
+├── models/                    # 数据模型层
+│   ├── session.py            # 会话状态枚举和模型定义
+│   └── plan.py               # 计划数据模型 (Plan, Task)
+├── services/                  # 核心服务层 (稳定层)
+│   ├── orchestrator.py        # 🎯 Orchestrator核心协调器 (原core_manager.py)
 │   ├── websocket_manager.py   # WebSocket管理器 - 实时通信
-│   └── llm/                   # Agent层 (扩展层)
-│       └── agents/            # 虚拟办公室员工
-│           ├── base.py        # 基础Agent类
-│           ├── director.py    # 🎯 智能项目总监
-│           ├── document_expert.py  # 📄 文档专家 (李心悦)
-│           ├── case_expert.py      # 🔍 案例专家 (王磊)
-│           ├── data_analyst.py     # 📊 数据分析师 (赵丽娅)
-│           ├── writer_expert.py    # ✍️ 写作专家 (张翰)
-│           └── chief_editor.py     # 👔 总编辑 (钱敏)
-└── tools/                     # 工具层 (功能层)
+│   └── llm_provider.py       # LLM提供者 - 统一AI接口
+├── roles/                     # MetaGPT标准Role层 (扩展层)
+│   ├── base.py               # 基础Agent类 (继承MetaGPT Role)
+│   ├── director.py           # 🎯 智能项目总监 (DirectorAgent)
+│   ├── document_expert.py    # 📄 文档专家 (DocumentExpertAgent)
+│   ├── case_expert.py        # 🔍 案例专家 (CaseExpertAgent)
+│   ├── data_analyst.py       # 📊 数据分析师 (DataAnalystAgent)
+│   └── writer_expert.py      # ✍️ 写作专家 (WriterExpertAgent)
+├── actions/                   # MetaGPT标准Action层 (功能层)
+│   ├── write_content_action.py    # 写作Action
+│   ├── summarize_action.py        # 摘要Action
+│   ├── polish_action.py           # 润色Action
+│   └── __init__.py               # Action导出
+├── memory/                    # 应用特定记忆系统
+│   ├── unified_memory_adapter.py
+│   └── unified_memory_storage.py
+├── prompts/                   # 提示词模板层
+│   ├── director_prompts.py
+│   ├── writer_expert_prompts.py
+│   ├── document_expert_prompts.py
+│   ├── data_analyst_prompts.py
+│   └── core_manager_prompts.py
+├── configs/                   # 配置层
+│   └── llm_provider.py       # LLM统一配置
+├── utils/                     # 工具函数层
+└── tools/                     # 外部工具集成层
     ├── alibaba_search.py      # 阿里巴巴搜索工具
-    └── mineru_api_tool.py     # MinerU文档处理API
+    ├── mineru_api_tool.py     # MinerU文档处理API
+    ├── summary_tool.py        # 摘要工具
+    └── writing_tools.py       # 写作工具
 ```
 
-## Frontend Structure (`frontend/src/`)
+## Frontend Structure (`frontend/src/`) - 现代化前端架构
 
 ```
 frontend/src/
@@ -47,8 +65,11 @@ frontend/src/
 ├── main.tsx            # Application entry point
 ├── index.css           # Global styles
 ├── components/         # Reusable UI components
-│   ├── Layout/         # Layout components (Sidebar, ChatArea, etc.)
+│   ├── Layout/         # Layout components
+│   │   ├── ChatArea.tsx      # 聊天区域 (已修复输入框聚焦问题)
+│   │   └── ...
 │   └── Chat/           # Chat-related components
+│       └── AgentMessage.tsx  # Agent消息组件
 ├── pages/              # Page components
 │   └── HomePage.tsx    # Main application page
 ├── stores/             # Zustand state management
@@ -69,6 +90,8 @@ frontend/src/
 每个项目都有自己的虚拟办公室，每个Agent都有独立的工作区：
 ```
 workspaces/{session_id}/
+├── director/                  # 🎯 项目总监工作区
+│   └── plans/               # 生成的计划文件
 ├── document_expert/           # 📄 李心悦的工作区 (文档专家)
 │   ├── uploads/              # 客户上传的原始文件
 │   ├── processed/            # MinerU处理后的Markdown文件
@@ -82,20 +105,37 @@ workspaces/{session_id}/
 │   └── charts/              # 生成的图表
 ├── writer_expert/            # ✍️ 张翰的工作区 (写作专家)
 │   └── drafts/              # 写作草稿
-├── chief_editor/             # 👔 钱敏的工作区 (总编辑)
-│   └── reviews/             # 审核记录
 └── final_report.md           # 最终报告
 ```
+
+## 架构层次说明
+
+### 1. 核心基础设施层 (稳定层)
+- **orchestrator.py**: Orchestrator核心协调器，状态机管理
+- **websocket_manager.py**: WebSocket通信管理
+- **llm_provider.py**: LLM统一接口
+
+### 2. MetaGPT标准层 (扩展层)
+- **roles/**: 所有Agent继承自MetaGPT的Role基类
+- **actions/**: 使用MetaGPT的Action机制实现原子化操作
+- **memory/**: 应用特定的记忆系统
+
+### 3. 业务逻辑层 (功能层)
+- **prompts/**: 提示词模板
+- **configs/**: 配置文件
+- **tools/**: 外部工具集成
 
 ## Naming Conventions
 
 ### Python Files
 - **Services**: `*_manager.py` for orchestration services
-- **Models**: Descriptive names like `session.py`
-- **Tools**: `*_tool.py` or descriptive names for external integrations
+- **Roles**: `*_agent.py` for MetaGPT Role implementations
+- **Actions**: `*_action.py` for MetaGPT Action implementations
+- **Models**: Descriptive names like `session.py`, `plan.py`
+- **Tools**: `*_tool.py` for external integrations
 
 ### TypeScript Files
-- **Components**: PascalCase (e.g., `HomePage.tsx`)
+- **Components**: PascalCase (e.g., `ChatArea.tsx`)
 - **Hooks**: camelCase with `use` prefix (e.g., `useWebSocket.ts`)
 - **Stores**: camelCase with descriptive suffix (e.g., `reportStore.ts`)
 
@@ -107,13 +147,16 @@ workspaces/{session_id}/
 
 ### Backend
 ```python
-# Relative imports within backend
-from backend.models.session import WorkSession
-from backend.services.intelligent_manager import intelligent_manager
-
 # MetaGPT imports
 from metagpt.roles import Role
 from metagpt.schema import Message
+from metagpt.actions import Action
+
+# Internal imports
+from backend.models.session import SessionState
+from backend.services.orchestrator import core_manager
+from backend.roles.director import DirectorAgent
+from backend.actions.write_content_action import WriteContentAction
 ```
 
 ### Frontend
@@ -121,10 +164,28 @@ from metagpt.schema import Message
 // Absolute imports with @ alias
 import { useReportStore } from '@/stores/reportStore';
 import Layout from '@/components/Layout/Layout';
+import { useWebSocket } from '@/hooks/useWebSocket';
 ```
+
+## 重构后的关键变化
+
+### 1. 文件重命名
+- `core_manager.py` → `orchestrator.py` (更精确的命名)
+- 所有Agent文件移至 `roles/` 目录
+
+### 2. 新增目录
+- `actions/`: MetaGPT标准Action层
+- `configs/`: 配置层
+- `utils/`: 工具函数层
+
+### 3. 架构优化
+- **Orchestrator模式**: 状态机驱动的协调器
+- **MetaGPT对齐**: 完全遵循MetaGPT的Role-Action架构
+- **职责分离**: Director只负责规划，Orchestrator只负责协调
 
 ## Testing Structure
 
 - **Architecture tests**: `test_*_architecture.py` - Test different workflow modes
 - **Workflow tests**: `test_*_workflow.py` - Test specific functionality
 - **Integration tests**: Test end-to-end scenarios with MetaGPT
+- **Orchestrator tests**: Test state machine and coordination logic

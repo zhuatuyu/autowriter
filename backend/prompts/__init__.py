@@ -5,7 +5,6 @@ LLM Prompts Module
 
 from . import director_prompts
 from . import core_manager_prompts
-from . import case_expert_prompts
 from . import data_analyst_prompts
 from . import document_expert_prompts
 from . import writer_expert_prompts
@@ -13,7 +12,6 @@ from . import writer_expert_prompts
 __all__ = [
     'director_prompts',
     'core_manager_prompts', 
-    'case_expert_prompts',
     'data_analyst_prompts',
     'document_expert_prompts',
     'writer_expert_prompts'

@@ -6,9 +6,14 @@ Actions模块
 from .write_content_action import WriteContentAction
 from .summarize_action import SummarizeAction
 from .polish_action import PolishAction
+# 新增案例研究Action
+from .case_research import CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch
 
 __all__ = [
     "WriteContentAction",
     "SummarizeAction", 
     "PolishAction",
+    "CollectCaseLinks",
+    "WebBrowseAndSummarizeCase",
+    "ConductCaseResearch",
 ]

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from backend.models.session import WorkSession, AgentMessage
 # 使用新的核心管理器
-from backend.services.core_manager import core_manager
+from backend.services.orchestrator import core_manager
 print("🚀 Using Core Manager")
 
 from backend.services.websocket_manager import WebSocketManager

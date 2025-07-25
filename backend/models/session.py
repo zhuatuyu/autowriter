@@ -129,3 +129,14 @@ class ReportStructure:
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat()
         }
+
+# 新增：会话状态枚举
+from enum import Enum
+
+class SessionState(Enum):
+    IDLE = "idle"  # 空闲状态，等待用户输入
+    PLANNING = "planning"  # 正在规划中，等待Director返回计划
+    AWAITING_USER_APPROVAL = "awaiting_user_approval"  # 等待用户对计划进行反馈
+    EXECUTING = "executing"  # 正在执行计划
+    COMPLETED = "completed"  # 计划执行完成
+    ERROR = "error"  # 出现错误

@@ -18,6 +18,9 @@ from backend.configs.llm_provider import llm
 # 导入公共工具
 from backend.tools.writing_tools import PolishContentAction, ReviewContentAction, SummarizeTextAction
 
+# 导入新的MetaGPT标准Actions
+from backend.actions import WriteContentAction, SummarizeAction, PolishAction
+
 # 导入新的Prompt模块
 from backend.prompts import writer_expert_prompts
 
@@ -89,6 +92,9 @@ class WriterExpertAgent(BaseAgent):
         self.reviews_dir = self.agent_workspace / "reviews"
         for d in [self.drafts_dir, self.summaries_dir, self.polished_dir, self.reviews_dir]:
             d.mkdir(exist_ok=True)
+        
+        # 新增：注册MetaGPT标准Actions（与现有toolbox并存）
+        self._setup_metagpt_actions()
             
         logger.info(f"✍️ 写作专家 {self.name} 初始化完成，已启用内置决策核心。")
 
@@ -202,3 +208,103 @@ class WriterExpertAgent(BaseAgent):
             
         except Exception as e:
             return f"✍️ {self.name}: 工作摘要获取失败 - {str(e)}"
+    
+    # ==================== MetaGPT标准方法 ====================
+    
+    def _setup_metagpt_actions(self):
+        """
+        设置MetaGPT标准的Actions
+        这是第二步重构的核心：让Role使用标准的Action系统
+        """
+        logger.info(f"🔧 {self.name} 正在注册MetaGPT标准Actions...")
+        
+        # 使用MetaGPT的set_actions方法注册标准Actions
+        self.set_actions([
+            WriteContentAction,
+            SummarizeAction, 
+            PolishAction
+        ])
+        
+        logger.info(f"✅ {self.name} MetaGPT标准Actions注册完成")
+    
+    async def _act(self) -> Message:
+        """
+        MetaGPT标准的Action执行方法
+        这是Role与Action交互的标准接口
+        替代原有的_execute_specific_task_with_messages方法
+        """
+        logger.info(f"✍️ {self.name} 开始执行MetaGPT标准Action: {self.rc.todo}")
+        
+        # 获取待执行的Action
+        todo = self.rc.todo
+        
+        # 从记忆中获取历史消息（MetaGPT标准）
+        history_messages = self.rc.memory.get(k=5)  # 获取最近5条消息
+        
+        # 尝试从最新消息中提取任务指令
+        instruction = ""
+        if history_messages:
+            latest_msg = history_messages[-1]
+            # 尝试从多个可能的字段中提取指令
+            if hasattr(latest_msg, 'instruct_content') and latest_msg.instruct_content:
+                if isinstance(latest_msg.instruct_content, dict):
+                    instruction = latest_msg.instruct_content.get('description', '')
+                elif hasattr(latest_msg.instruct_content, 'description'):
+                    instruction = latest_msg.instruct_content.description
+                else:
+                    instruction = str(latest_msg.instruct_content)
+            elif hasattr(latest_msg, 'content') and latest_msg.content:
+                instruction = latest_msg.content
+        
+        try:
+            # 执行Action
+            if todo.name == "WriteContent":
+                result = await todo.run(history_messages, instruction=instruction)
+                output_dir = self.drafts_dir
+                file_prefix = "draft"
+            elif todo.name == "SummarizeText":
+                result = await todo.run(history_messages)
+                output_dir = self.summaries_dir
+                file_prefix = "summary"
+            elif todo.name == "PolishContent":
+                result = await todo.run(history_messages)
+                output_dir = self.polished_dir
+                file_prefix = "polished"
+            else:
+                result = await todo.run(history_messages)
+                output_dir = self.agent_workspace
+                file_prefix = "output"
+            
+            # 保存结果到文件（保持与原有逻辑一致）
+            safe_instruction = "".join(c if c.isalnum() else '_' for c in instruction[:30])
+            output_file = output_dir / f"{file_prefix}_{safe_instruction}_{datetime.now().strftime('%H%M%S')}.md"
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(result)
+            
+            logger.info(f"✅ {self.name} 完成Action: {todo.name}, 结果已保存到 {output_file.name}")
+            
+            # 返回MetaGPT标准的Message
+            return Message(
+                content=result,
+                cause_by=todo,
+                instruct_content={
+                    "action_name": todo.name,
+                    "file_created": output_file.name,
+                    "status": "completed"
+                }
+            )
+            
+        except Exception as e:
+            error_msg = f"{self.name} 执行Action {todo.name} 失败: {e}"
+            logger.error(error_msg, exc_info=True)
+            
+            # 返回错误消息
+            return Message(
+                content=f"❌ 执行失败: {error_msg}",
+                cause_by=todo,
+                instruct_content={
+                    "action_name": todo.name,
+                    "status": "error",
+                    "error": str(e)
+                }
+            )

@@ -9,6 +9,7 @@ const ChatArea: React.FC = () => {
     const [input, setInput] = useState('');
     const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null); // 新增：输入框引用
 
   useEffect(() => {
         endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });

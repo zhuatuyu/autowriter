@@ -221,11 +221,6 @@ class DirectorAgent(BaseAgent):
         
         tasks_text_parts = ["**📝 步骤如下:**"]
         
-        # 诊断日志：打印出可用的Agent能力
-        logger.info(f"======== 格式化计划展示：可用Agent能力 ========")
-        logger.info(self.agent_capabilities)
-        logger.info(f"==============================================")
-        
         for i, task in enumerate(plan.tasks):
             agent_name = "未知执行者"
             agent_id = getattr(task, 'agent', 'N/A')

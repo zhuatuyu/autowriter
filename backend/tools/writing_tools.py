@@ -6,8 +6,8 @@
 from typing import List
 from metagpt.actions import Action
 from metagpt.schema import Message
-from backend.services.llm_provider import llm
-from backend.services.llm.prompts import writer_expert_prompts
+from backend.configs.llm_provider import llm
+from backend.prompts import writer_expert_prompts
 
 
 class PolishContentAction(Action):

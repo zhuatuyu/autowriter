@@ -6,7 +6,7 @@ from typing import Dict, Any, List
 
 from metagpt.logs import logger
 from metagpt.schema import AIMessage, Message
-from backend.services.llm.agents.base import BaseAgent
+from backend.roles.base import BaseAgent
 from backend.models.plan import Plan, Task
 
 class PlannerAgent(BaseAgent):

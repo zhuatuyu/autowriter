@@ -14,13 +14,13 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from .base import BaseAgent
-from backend.services.llm_provider import llm
+from backend.configs.llm_provider import llm
 from backend.tools.mineru_api_tool import mineru_tool
 # 导入新的摘要工具
 from backend.tools.summary_tool import summary_tool
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import document_expert_prompts
+from backend.prompts import document_expert_prompts
 
 class DocumentProcessAction(Action):
     """文档处理动作"""

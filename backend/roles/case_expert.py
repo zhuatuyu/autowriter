@@ -12,13 +12,13 @@ from metagpt.actions import Action
 from metagpt.schema import Message
 from metagpt.logs import logger
 
-from backend.services.llm.agents.base import BaseAgent
+from backend.roles.base import BaseAgent
 from backend.tools.alibaba_search import AlibabaSearchTool
 # 导入新的摘要工具
 from backend.tools.summary_tool import summary_tool
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import case_expert_prompts
+from backend.prompts import case_expert_prompts
 
 
 class CaseSearchAction(Action):

@@ -10,13 +10,13 @@ import json
 import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from backend.services.llm.agents.base import BaseAgent
+from backend.roles.base import BaseAgent
 from backend.models.plan import Plan, Task
 from metagpt.llm import LLM
 import re
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import director_prompts
+from backend.prompts import director_prompts
 
 
 class DirectorAgent(BaseAgent):

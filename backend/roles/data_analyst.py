@@ -14,10 +14,10 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from .base import BaseAgent
-from backend.services.llm_provider import llm
+from backend.configs.llm_provider import llm
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import data_analyst_prompts
+from backend.prompts import data_analyst_prompts
 
 
 class DataExtractionAction(Action):

@@ -14,12 +14,12 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from .base import BaseAgent
-from backend.services.llm_provider import llm
+from backend.configs.llm_provider import llm
 # 导入公共工具
 from backend.tools.writing_tools import PolishContentAction, ReviewContentAction, SummarizeTextAction
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import writer_expert_prompts
+from backend.prompts import writer_expert_prompts
 
 
 class WritingAction(Action):

@@ -2,7 +2,7 @@
 Summary Tool
 提供一个可复用的文本摘要工具，供所有智能体使用。
 """
-from backend.services.llm_provider import llm
+from backend.configs.llm_provider import llm
 from metagpt.logs import logger
 
 class SummaryTool:

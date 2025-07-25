@@ -9,16 +9,16 @@ from datetime import datetime
 from pathlib import Path
 
 # 调整导入路径以适应新的Agent结构
-from backend.services.llm.agents.director import DirectorAgent
-from backend.services.llm.agents.document_expert import DocumentExpertAgent
-from backend.services.llm.agents.case_expert import CaseExpertAgent
-from backend.services.llm.agents.writer_expert import WriterExpertAgent
-from backend.services.llm.agents.data_analyst import DataAnalystAgent
-from backend.services.llm.agents.planner import PlannerAgent
+from backend.roles.director import DirectorAgent
+from backend.roles.document_expert import DocumentExpertAgent
+from backend.roles.case_expert import CaseExpertAgent
+from backend.roles.writer_expert import WriterExpertAgent
+from backend.roles.data_analyst import DataAnalystAgent
+from backend.roles.planner import PlannerAgent
 from backend.services.websocket_manager import WebSocketManager
 
 # 导入新的Prompt模块
-from backend.services.llm.prompts import core_manager_prompts
+from backend.prompts import core_manager_prompts
 
 # Agent团队配置 (不包含Director和Planner)
 AGENT_TEAM_CONFIG = {
@@ -52,7 +52,7 @@ class CoreManager:
             session_workspace.mkdir(exist_ok=True)
 
             # 为新会话创建唯一的记忆管理器
-            from backend.services.llm.unified_memory_adapter import UnifiedMemoryManager
+            from backend.memory.unified_memory_adapter import UnifiedMemoryManager
             memory_manager = UnifiedMemoryManager(str(session_workspace))
             
             # 初始化会话上下文

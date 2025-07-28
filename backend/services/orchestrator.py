@@ -10,7 +10,7 @@ from pathlib import Path
 
 # 调整导入路径以适应新的Agent结构
 from backend.roles.director import DirectorAgent
-from backend.roles.document_expert import DocumentExpertAgent
+
 from backend.roles.case_expert import CaseExpertAgent
 from backend.roles.writer_expert import WriterExpertAgent
 from backend.roles.data_analyst import DataAnalystAgent
@@ -20,12 +20,9 @@ from backend.models.plan import Plan, Task  # 引入Plan和Task模型
 from metagpt.schema import Message  # 引入MetaGPT的Message类
 from metagpt.logs import logger  # 引入MetaGPT的日志记录器
 
-# 导入新的Prompt模块
-from backend.prompts import core_manager_prompts
-
 # Agent团队配置 (不包含Director和Planner)
 AGENT_TEAM_CONFIG = {
-    'document_expert': DocumentExpertAgent,
+    
     'case_expert': CaseExpertAgent,
     'writer_expert': WriterExpertAgent,
     'data_analyst': DataAnalystAgent,
@@ -55,10 +52,6 @@ class Orchestrator:
             session_workspace = self.workspace_base / session_id
             session_workspace.mkdir(exist_ok=True)
 
-            # 为新会话创建唯一的记忆管理器
-            from backend.memory.unified_memory_adapter import UnifiedMemoryManager
-            memory_manager = UnifiedMemoryManager(str(session_workspace))
-            
             # 初始化会话上下文
             self.sessions_context[session_id] = {
                 'session_id': session_id,
@@ -67,7 +60,6 @@ class Orchestrator:
                 'started_at': datetime.now().isoformat(),
                 'workspace_path': str(session_workspace),
                 'agents': {},
-                'memory_manager': memory_manager,
                 'current_plan': None,
                 'state': SessionState.IDLE  # 新增：初始化会话状态
             }
@@ -106,32 +98,19 @@ class Orchestrator:
         try:
             session_context = self.sessions_context[session_id]
             workspace_path = session_context['workspace_path']
-            memory_manager = session_context['memory_manager']
             
             agents = {}
             
             # 1. 创建总监 (Director)
-            director_workspace = Path(workspace_path) / "director"
-            director = DirectorAgent(
-                session_id=session_id,
-                workspace_path=str(director_workspace),
-                memory_manager=memory_manager
-            )
-            agents[director.agent_id] = director
-            print(f"  ✅ 创建Agent: {director.profile} ({director.role})")
-
+            director = DirectorAgent()
+            agents['director'] = director
+            print(f"  ✅ 创建Agent: {director.profile} ({director.name})")
 
             # 2. 创建专业Agent团队
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
-                agent_workspace = Path(workspace_path) / agent_id
-                agent = agent_class(
-                    agent_id=agent_id, 
-                    session_id=session_id, 
-                    workspace_path=str(agent_workspace),
-                    memory_manager=memory_manager
-                )
+                agent = agent_class()
                 agents[agent_id] = agent
-                print(f"  ✅ 创建Agent: {agent.name} ({getattr(agent, 'profile', agent_id)})")
+                print(f"  ✅ 创建Agent: {agent.profile} ({agent.name})")
             
             self.sessions_context[session_id]['agents'] = agents
             
@@ -360,7 +339,9 @@ class Orchestrator:
         session_context = self.sessions_context[session_id]
         
         # 初始上下文是用户最开始的请求
-        last_message = Message(content=plan.goal, role="user", cause_by="user_request")
+        # 使用MetaGPT标准的UserRequirement作为cause_by
+        from metagpt.actions.add_requirement import UserRequirement
+        last_message = Message(content=plan.goal, role="user", cause_by=UserRequirement)
 
         for i, task in enumerate(plan.tasks, 1):
             target_agent_id = task.agent
@@ -371,25 +352,47 @@ class Orchestrator:
                 print(f"❌ {error_msg}")
                 return {"status": "error", "error": error_msg}
             
-            await websocket_manager.broadcast_agent_message(session_id, agent.agent_id, agent.name, f"正在执行任务: {task.description}", "working")
+            await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"正在执行任务: {task.description}", "working")
             
             try:
-                # 按照MetaGPT标准做法：直接调用 agent.run(task.description)
+                # 按照MetaGPT标准做法：直接调用 agent.run(message)
                 # 让 Role 自己管理内存和 Action 流程
-                result_message = await agent.run(task.description)
+                print(f"🔍 调试: 准备调用 {agent.profile}.run() 方法")
+                print(f"🔍 调试: 传入消息类型: {type(last_message)}, 内容: {last_message.content[:100]}...")
+                print(f"🔍 调试: Agent当前内存消息数: {len(agent.rc.memory.storage) if hasattr(agent, 'rc') and hasattr(agent.rc, 'memory') else 'N/A'}")
+                
+                result_message = await agent.run(last_message)
+                
+                print(f"🔍 调试: agent.run() 返回值类型: {type(result_message)}")
+                print(f"🔍 调试: agent.run() 返回值: {result_message}")
+                print(f"🔍 调试: Agent执行后内存消息数: {len(agent.rc.memory.storage) if hasattr(agent, 'rc') and hasattr(agent.rc, 'memory') else 'N/A'}")
 
+                # MetaGPT的Role.run()可能返回None（当没有新消息需要处理时）
+                # 这是正常行为，我们需要从agent的内存中获取最新的消息
                 if not result_message:
-                    logger.error(f"任务 {task.task_id} '{task.description}' 执行后没有返回结果消息。")
-                    error_message = f"任务 {task.task_id} 执行异常，智能体未返回结果。"
-                    break
+                    print(f"🔍 调试: agent.run() 返回None，尝试从内存获取最新消息")
+                    # 从agent的内存中获取最新的消息作为结果
+                    try:
+                        memories = agent.rc.memory.get(k=1)
+                        print(f"🔍 调试: 从内存获取到 {len(memories) if memories else 0} 条消息")
+                        if memories:
+                            result_message = memories[0]
+                            print(f"🔍 调试: 使用内存中的消息作为结果: {type(result_message)}")
+                        else:
+                            logger.error(f"任务 {task.id} '{task.description}' 执行后没有返回结果消息，且内存中也没有消息。")
+                            error_message = f"任务 {task.id} 执行异常，智能体未返回结果。"
+                            return {"status": "error", "error": error_message}
+                    except Exception as memory_error:
+                        print(f"🔍 调试: 访问agent内存失败: {memory_error}")
+                        logger.error(f"访问agent内存失败: {memory_error}")
+                        error_message = f"任务 {task.id} 执行异常，无法访问智能体内存。"
+                        return {"status": "error", "error": error_message}
                 
                 # 更新上下文，用于下一个任务
                 last_message = result_message
+                print(f"🔍 调试: 最终结果消息类型: {type(last_message)}, 内容: {last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...")
                 
-                # 记录工作记忆
-                agent.record_work_memory(task.description, result_message.content)
-                
-                await websocket_manager.broadcast_agent_message(session_id, agent.agent_id, agent.name, f"任务完成: {task.description}", "completed")
+                await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"任务完成: {task.description}", "completed")
 
             except Exception as e:
                 error_msg = f"任务 {i} '{task.description}' 执行失败: {e}"

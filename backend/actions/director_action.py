@@ -1,13 +1,30 @@
 """
-DirectorAgent's Prompts
-存放智能项目总监(DirectorAgent)所有与LLM交互的提示词模板。
+DirectorAgent's Actions
 """
+from metagpt.actions import Action
+from metagpt.llm import LLM
+from metagpt.provider.base_llm import BaseLLM
+from typing import Dict, List, Optional, Any
 import json
+import re
 from backend.models.plan import Plan
+from pydantic import ValidationError
+from metagpt.logs import logger
 
-def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_capabilities: dict) -> str:
-    """获取用于生成计划的Prompt"""
-    return f"""
+
+class CreatePlan(Action):
+    """
+    Action to create a plan based on user request.
+    """
+    name: str = "CreatePlan"
+
+    async def run(self, user_request: str, agent_capabilities: dict) -> Optional[Plan]:
+        prompt = self._get_prompt(user_request, agent_capabilities)
+        plan_json_str = await self.llm.aask(prompt)
+        return self._parse_and_validate_plan(plan_json_str)
+
+    def _get_prompt(self, user_request: str, agent_capabilities: dict) -> str:
+        return f"""
 # 指令：作为智能项目总监，为用户请求制定一份详尽的、可执行的SOP（Standard Operating Procedure）计划。
 
 ## 核心原则
@@ -23,14 +40,9 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
 {json.dumps(agent_capabilities, indent=2, ensure_ascii=False)}
 ```
 
-## 当前对话上下文（最近5条）
----
-{formatted_history}
----
-
 ## 用户最新请求
 ---
-{user_message}
+{user_request}
 ---
 
 ## 你的任务
@@ -42,7 +54,7 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
   "tasks": [
     {{
       "id": "task_1",
-      "description": "这里填写第一个原子任务的具体、可执行的描述。例如：'搜索"数字化城市管理政府购买服务项目的成功案例"'",
+      "description": "这里填写第一个原子任务的具体、可执行的描述。例如：'搜索\"数字化城市管理政府购买服务项目的成功案例\"'",
       "agent": "这里精确指定负责此任务的agent_id，例如：'case_expert'",
       "dependencies": []
     }},
@@ -54,7 +66,7 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
     }},
     {{
       "id": "task_3",
-      "description": "这里填写第三个原子任务。例如：'根据task_2的总结，撰写报告的"案例分析"章节'",
+      "description": "这里填写第三个原子任务。例如：'根据task_2的总结，撰写报告的\"案例分析\"章节'",
       "agent": "writer_expert",
       "dependencies": ["task_2"]
     }}
@@ -65,9 +77,34 @@ def get_plan_generation_prompt(formatted_history: str, user_message: str, agent_
 请立即生成SOP计划JSON。
 """
 
-def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_feedback: str, agent_capabilities: dict) -> str:
-    """获取用于修订计划的Prompt"""
-    return f"""
+    def _parse_and_validate_plan(self, plan_json_str: str) -> Optional[Plan]:
+        try:
+            match = re.search(r"```json\n(.*?)\n```", plan_json_str, re.DOTALL)
+            if match:
+                plan_json_str = match.group(1)
+
+            plan_data = json.loads(plan_json_str)
+            plan = Plan(**plan_data)
+            logger.info(f"✅ 计划解析成功，共 {len(plan.tasks)} 个任务。")
+            return plan
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"❌ 解析或验证计划失败: {e}\n原始JSON字符串:\n{plan_json_str}")
+            return None
+
+
+class RevisePlan(Action):
+    """
+    Action to revise a plan based on user feedback.
+    """
+    name: str = "RevisePlan"
+
+    async def run(self, original_plan: Plan, user_feedback: str, agent_capabilities: dict) -> Optional[Plan]:
+        prompt = self._get_prompt(original_plan, user_feedback, agent_capabilities)
+        plan_json_str = await self.llm.aask(prompt)
+        return self._parse_and_validate_plan(plan_json_str)
+
+    def _get_prompt(self, original_plan: Plan, user_feedback: str, agent_capabilities: dict) -> str:
+        return f"""
 # 指令：作为智能项目总监，根据用户的反馈修订现有的SOP计划。
 
 ## 核心原则
@@ -81,11 +118,6 @@ def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_f
 ```json
 {json.dumps(agent_capabilities, indent=2, ensure_ascii=False)}
 ```
-
-## 当前对话上下文
----
-{formatted_history}
----
 
 ## 待修订的原始计划
 ```json
@@ -123,63 +155,38 @@ def get_plan_revision_prompt(formatted_history: str, original_plan: Plan, user_f
 请立即生成修订后的SOP计划JSON。
 """
 
-def get_direct_answer_prompt(formatted_history: str, user_message: str, intent: str, team_summary: dict = None) -> str:
-    """获取用于直接回答问题的Prompt"""
-    if intent == 'status_inquiry':
-        status_context = json.dumps(team_summary, ensure_ascii=False, indent=2) if team_summary else "暂无项目状态信息。"
+    def _parse_and_validate_plan(self, plan_json_str: str) -> Optional[Plan]:
+        try:
+            match = re.search(r"```json\n(.*?)\n```", plan_json_str, re.DOTALL)
+            if match:
+                plan_json_str = match.group(1)
+
+            plan_data = json.loads(plan_json_str)
+            plan = Plan(**plan_data)
+            logger.info(f"✅ 计划解析成功，共 {len(plan.tasks)} 个任务。")
+            return plan
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"❌ 解析或验证计划失败: {e}\n原始JSON字符串:\n{plan_json_str}")
+            return None
+
+
+class DirectAnswer(Action):
+    """
+    Action to directly answer a user's simple question.
+    """
+    name: str = "DirectAnswer"
+
+    async def run(self, user_message: str, intent: str) -> str:
+        prompt = self._get_prompt(user_message, intent)
+        response = await self.llm.aask(prompt)
+        return response.strip()
+
+    def _get_prompt(self, user_message: str, intent: str) -> str:
         return f"""
-# 指令：作为AI项目总监，根据上下文和当前项目状态，回答用户的状态查询。
-
-## 对话历史
-{formatted_history}
-
-## 当前项目状态摘要
-{status_context}
-
-## 用户问题
-"{user_message}"
-
----
-请用人性化的语言，清晰地回答用户关于项目进展的问题。
-"""
-    else: #  trivial_chat, simple_qa, contextual_follow_up
-        return f"""
-# 指令：作为AI项目总监，根据上下文，用人性化、专业的语言回答用户的问题。
-
-## 对话历史
-{formatted_history}
-
-## 用户最新消息
-"{user_message}"
-
----
-请直接回答用户。如果是闲聊，请礼貌回应；如果是问题，请提供简洁、准确的答案；如果是追问，请结合上下文进行解释。
-"""
-
-def get_intent_classification_prompt(formatted_history: str, user_message: str, pending_plan_str: str = None) -> str:
-    """获取用于用户意图分类的Prompt"""
-    plan_context_str = ""
-    if pending_plan_str:
-        plan_context_str = f"\\n---\\n## 待审批的计划\\n你已经向用户提出了以下计划，正在等待用户反馈：\\n{pending_plan_str}\\n---"
-
-    return f"""
-# 指令：分析用户意图
-
-根据对话历史和用户最新消息，将用户意图分类到以下类别之一。
-
-## 对话历史
-{formatted_history}
-{plan_context_str}
-## 用户最新消息
-"{user_message}"
-
-## 意图类别
-1.  **trivial_chat**: 简单的问候、感谢或无关的闲聊。 (例如: "你好", "谢谢你", "今天天气不错")
-2.  **simple_qa**: 关于某个主题的直接问题，可以由专家一次性回答，不需要多步骤计划。(例如: "绩效报告的关键要素是什么？", "写摘要有什么技巧？")
-3.  **contextual_follow_up**: 对上一轮对话的追问，依赖紧密的上下文。(例如: "继续说", "详细解释一下", "为什么？")
-4.  **status_inquiry**: 查询项目或任务的当前状态。(例如: "我们上次聊到哪了?", "报告写得怎么样了？")
-5.  **planning_request**: 提出一个需要多个步骤或多个专家协作才能完成的复杂需求。(例如: "帮我写一份关于XX的报告", "分析一下这份文件并给出改进建议")
-6.  **plan_feedback**: (仅当存在'待审批的计划'时) 用户对你提出的计划进行反馈，无论是同意、否定还是提出修改意见。
-
-请只输出最匹配的意图类别名称（例如: `planning_request`）。
-""" 
+        你是一个智能项目总监，用户向你提出了一个简单的问题。请简洁、友好地回答。
+        
+        用户问题: {user_message}
+        问题类型: {intent}
+        
+        请直接回答，不要过于复杂。
+        """

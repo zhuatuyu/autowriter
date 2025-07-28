@@ -6,7 +6,7 @@ import requests
 import json
 
 def test_api():
-    base_url = "http://localhost:8000"
+    base_url = "http://localhost:8001"
     
     # 测试健康检查
     try:
@@ -48,4 +48,4 @@ def test_api():
         print(f"获取报告内容失败: {e}")
 
 if __name__ == "__main__":
-    test_api() 
+    test_api()

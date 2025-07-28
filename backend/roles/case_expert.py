@@ -9,7 +9,7 @@ from metagpt.logs import logger
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
-from backend.roles.base import BaseAgent
+from metagpt.roles.role import Role
 from backend.actions.case_research import (
     CollectCaseLinks, 
     WebBrowseAndSummarizeCase, 
@@ -25,7 +25,7 @@ class CaseReport(BaseModel):
     content: str = ""
 
 
-class CaseExpertAgent(BaseAgent):
+class CaseExpertAgent(Role):
     """
     案例专家Agent，其工作流程被定义为一系列可重用的Actions:
     1. CollectCaseLinks: 收集相关链接
@@ -34,23 +34,25 @@ class CaseExpertAgent(BaseAgent):
     """
     def __init__(
         self, 
-        agent_id: str = "case_expert", 
-        session_id: str = None, 
-        workspace_path: str = None, 
-        memory_manager=None,
-        search_config: dict = None # 允许外部传入搜索配置
+        name: str = "CaseExpert", 
+        profile: str = "CaseExpert", 
+        goal: str = "搜索、分析并提供与项目相关的深度案例研究报告",
+        search_config: dict = None, # 允许外部传入搜索配置
+        **kwargs
     ):
+        # 1. Call super() first to correctly initialize the Pydantic model and context.
         super().__init__(
-            agent_id=agent_id,
-            session_id=session_id,
-            workspace_path=workspace_path,
-            memory_manager=memory_manager,
-            role="案例专家",
-            profile="王磊",
-            goal="搜索、分析并提供与项目相关的深度案例研究报告"
+            name=name, 
+            profile=profile, 
+            goal=goal, 
+            **kwargs
         )
         
-        # 1. 配置并初始化搜索引擎
+        # 2. Now that self.config.workspace is initialized, set up dependent paths.
+        self.cases_dir = self.config.workspace.path / "cases"
+        self.cases_dir.mkdir(exist_ok=True, parents=True)
+
+        # 3. Configure and initialize the search engine.
         default_search_config = {
             "api_key": "OS-ykkz87t4q83335yl",
             "endpoint": "http://default-0t01.platform-cn-shanghai.opensearch.aliyuncs.com",
@@ -58,20 +60,10 @@ class CaseExpertAgent(BaseAgent):
             "service_id": "ops-web-search-001"
         }
         self.search_engine = alibaba_search_engine(search_config or default_search_config)
-        
-        # 2. 注册Action工作流
-        self.set_actions([
-            CollectCaseLinks,
-            WebBrowseAndSummarizeCase,
-            ConductCaseResearch,
-        ])
-        
-        # 3. 设置为顺序执行模式
-        self._set_react_mode(react_mode=RoleReactMode.BY_ORDER.value)
-        
-        # 创建工作子目录
-        self.cases_dir = self.agent_workspace / "cases"
-        self.cases_dir.mkdir(exist_ok=True)
+
+        # 4. 使用MetaGPT标准方式设置actions和react_mode
+        self.set_actions([CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch])
+        self._set_react_mode(RoleReactMode.BY_ORDER.value, len(self.actions))
 
 
     async def _act(self) -> Message:
@@ -79,7 +71,7 @@ class CaseExpertAgent(BaseAgent):
         通过按顺序执行预定义的Action来完成案例研究任务。
         完全模仿 Researcher._act 的逻辑，使用Pydantic模型传递状态。
         """
-        logger.info(f"[{self.profile}] to do {self.rc.todo}({self.rc.todo.name})")
+        logger.info(f"[{self.profile}] to do {self.rc.todo.name})")
         todo = self.rc.todo
         msg = self.rc.memory.get(k=1)[0]
         
@@ -91,27 +83,30 @@ class CaseExpertAgent(BaseAgent):
             topic = msg.content
             report = CaseReport(topic=topic)
 
-        # 根据当前Action执行不同操作
+        # 根据当前Action执行不同操作，模仿Researcher的逻辑
         if isinstance(todo, CollectCaseLinks):
-            links = await todo.run(topic=topic, search_engine=self.search_engine)
-            report.links = links
-            ret = Message(content=topic, instruct_content=report, role=self.profile, cause_by=todo)
-
+            # 为CollectCaseLinks设置search_engine
+            todo.search_engine = self.search_engine
+            links = await todo.run(topic=topic, links=report.links, summaries=report.summaries)
+            ret = Message(
+                content="", instruct_content=CaseReport(topic=topic, links=links), role=self.profile, cause_by=todo
+            )
         elif isinstance(todo, WebBrowseAndSummarizeCase):
-            links = report.links
-            summaries = await todo.run(links=links)
-            report.summaries = summaries
+            summaries = await todo.run(topic=topic, links=report.links, summaries=report.summaries)
+            ret = Message(
+                content="", instruct_content=CaseReport(topic=topic, links=report.links, summaries=summaries), role=self.profile, cause_by=todo
+            )
+        elif isinstance(todo, ConductCaseResearch):
+            content = await todo.run(topic=topic, links=report.links, summaries=report.summaries, output_dir=self.cases_dir)
+            ret = Message(
+                content="",
+                instruct_content=CaseReport(topic=topic, links=report.links, summaries=report.summaries, content=str(content)),
+                role=self.profile,
+                cause_by=todo,
+            )
+        else:
+            # 默认情况，直接返回原消息
             ret = Message(content=topic, instruct_content=report, role=self.profile, cause_by=todo)
 
-        elif isinstance(todo, ConductCaseResearch):
-            summaries = report.summaries
-            report_path = await todo.run(topic=topic, summaries=summaries, output_dir=self.cases_dir)
-            report.content = str(report_path)
-            ret = Message(content=str(report_path), instruct_content=report, role=self.profile, cause_by=todo)
-        
-        else:
-            logger.warning(f"未知或不支持的Action: {type(todo)}")
-            ret = Message(content="任务执行失败，遇到未知Action", role=self.profile, cause_by=todo)
-            
         self.rc.memory.add(ret)
-        return ret 
+        return ret

@@ -74,16 +74,24 @@ class CollectCaseLinks(Action):
     完全复刻自 metagpt.actions.research.CollectLinks
     """
     
-    def __init__(self, **kwargs):
+    def __init__(self, search_engine: SearchEngine = None, **kwargs):
         super().__init__(**kwargs)
+        self.search_engine = search_engine
     
     async def run(
         self,
         topic: str,
-        search_engine: SearchEngine,
+        links: Dict[str, List[str]] = None,
+        summaries: Dict[str, str] = None,
+        search_engine: SearchEngine = None,
         decomposition_nums: int = 2,  # 测试阶段降低到2
         url_per_query: int = 2,      # 测试阶段降低到2
     ) -> Dict[str, List[str]]:
+        # 使用存储的search_engine，如果没有则使用传递的参数
+        engine = search_engine or self.search_engine
+        if not engine:
+            raise ValueError("search_engine is required but not provided")
+            
         system_text = CASE_RESEARCH_TOPIC_SYSTEM.format(topic=topic)
         keywords = await self._aask(SEARCH_TOPIC_PROMPT, [system_text])
         try:
@@ -93,7 +101,7 @@ class CollectCaseLinks(Action):
             logger.exception(f"解析关键词失败 '{topic}' for {e}, 使用主题作为关键词")
             keywords = [topic]
         
-        results = await asyncio.gather(*(search_engine.run(i, as_string=False) for i in keywords))
+        results = await asyncio.gather(*(engine.run(i, as_string=False) for i in keywords))
 
         # 直接构造prompt，避免复杂的生成器逻辑
         search_results = "\n".join(
@@ -114,7 +122,7 @@ class CollectCaseLinks(Action):
 
         ret = {}
         for query in queries:
-            ret[query] = await self._search_and_rank_urls(topic, query, search_engine, url_per_query)
+            ret[query] = await self._search_and_rank_urls(topic, query, engine, url_per_query)
         return ret
 
     async def _search_and_rank_urls(
@@ -145,7 +153,9 @@ class WebBrowseAndSummarizeCase(Action):
     """
     async def run(
         self,
-        links: Dict[str, List[str]],
+        topic: str,
+        links: Dict[str, List[str]] = None,
+        summaries: Dict[str, str] = None,
         system_text: str = CASE_RESEARCH_BASE_SYSTEM,
     ) -> Dict[str, str]:
         
@@ -188,7 +198,7 @@ class ConductCaseResearch(Action):
     Action: 撰写最终的案例研究报告并保存到文件。
     复刻自 metagpt.actions.research.ConductResearch 并增加了保存逻辑。
     """
-    async def run(self, topic: str, summaries: Dict[str, str], output_dir: Path) -> Path:
+    async def run(self, topic: str, links: Dict[str, List[str]] = None, summaries: Dict[str, str] = None, output_dir: Path = None) -> Path:
         summary_text = "\n\n---\n\n".join(f"**来源链接**: {url}\n\n**内容摘要**:\n{summary}" for url, summary in summaries.items())
         
         prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=summary_text)
@@ -208,4 +218,4 @@ class ConductCaseResearch(Action):
             logger.error(f"保存报告失败: {e}")
             return content  # 即使保存失败，也返回内容
 
-        return report_file 
+        return report_file

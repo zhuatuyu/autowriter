@@ -15,7 +15,7 @@ from pathlib import Path
 from backend.models.session import WorkSession, AgentMessage
 # 使用新的核心管理器
 from backend.services.orchestrator import orchestrator
-print("🚀 Using Core Manager")
+print("🚀 Orchestrator is Running")
 
 from backend.services.websocket_manager import WebSocketManager
 from backend.services.api import router as workspace_router
@@ -198,16 +198,8 @@ async def handle_user_intervention(session_id: str, message: dict):
     #     "timestamp": datetime.now().isoformat()
     # })
     
-    # 检查是否需要启动分析
-    session_status = await orchestrator.get_session_status(session_id)
-    if 'error' in session_status:
-        print(f"🚀 Detected new session, starting workflow for user message in session {session_id}")
-        # 启动新的工作会话
-        await orchestrator.start_session(session_id)
-        await orchestrator.handle_user_message(session_id, user_message, websocket_manager)
-    else:
-        # 如果已经有活跃会话，作为用户输入处理
-        await orchestrator.handle_user_intervention(session_id, user_message, websocket_manager)
+    # 直接将消息传递给Orchestrator，由它根据内部状态决定如何处理
+    await orchestrator.handle_user_message(session_id, user_message, websocket_manager)
 
 async def start_agent_analysis(session_id: str, message: dict):
     """启动Agent分析流程"""
@@ -402,4 +394,4 @@ async def start_iterative_workflow(request: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8001, reload=True)

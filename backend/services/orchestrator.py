@@ -19,6 +19,7 @@ from backend.models.session import SessionState  # 引入会话状态枚举
 from backend.models.plan import Plan, Task  # 引入Plan和Task模型
 from metagpt.schema import Message  # 引入MetaGPT的Message类
 from metagpt.logs import logger  # 引入MetaGPT的日志记录器
+from backend.utils.project_repo import ProjectRepo # 引入项目仓库管理
 
 # Agent团队配置 (不包含Director和Planner)
 AGENT_TEAM_CONFIG = {
@@ -48,9 +49,10 @@ class Orchestrator:
 
             print(f"🚀 启动新的智能工作会话: {session_id}")
             
-            # 创建会话工作空间
+            # 创建会话工作空间和项目仓库
             session_workspace = self.workspace_base / session_id
-            session_workspace.mkdir(exist_ok=True)
+            project_repo = ProjectRepo(session_id)
+
 
             # 初始化会话上下文
             self.sessions_context[session_id] = {
@@ -59,6 +61,7 @@ class Orchestrator:
                 'status': 'active', # 保留旧status，用于兼容
                 'started_at': datetime.now().isoformat(),
                 'workspace_path': str(session_workspace),
+                'project_repo': project_repo, # 存储项目仓库实例
                 'agents': {},
                 'current_plan': None,
                 'state': SessionState.IDLE  # 新增：初始化会话状态
@@ -98,6 +101,7 @@ class Orchestrator:
         try:
             session_context = self.sessions_context[session_id]
             workspace_path = session_context['workspace_path']
+            project_repo = session_context['project_repo']
             
             agents = {}
             
@@ -106,11 +110,17 @@ class Orchestrator:
             agents['director'] = director
             print(f"  ✅ 创建Agent: {director.profile} ({director.name})")
 
-            # 2. 创建专业Agent团队
+            # 2. 创建专业Agent团队，并注入ProjectRepo
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
-                agent = agent_class()
+                # 创建context并注入ProjectRepo
+                from metagpt.context import Context
+                context = Context()
+                context.kwargs.set('project_repo', project_repo)
+                
+                # 使用context创建agent
+                agent = agent_class(context=context)
                 agents[agent_id] = agent
-                print(f"  ✅ 创建Agent: {agent.profile} ({agent.name})")
+                print(f"  ✅ 创建Agent: {agent.profile} ({agent.name}) - 已注入ProjectRepo")
             
             self.sessions_context[session_id]['agents'] = agents
             
@@ -337,6 +347,7 @@ class Orchestrator:
         """
         print(f"🚀 {session_id} Orchestrator 开始执行计划: {plan.goal}")
         session_context = self.sessions_context[session_id]
+        project_repo = session_context.get('project_repo') # 获取 project_repo
         
         # 初始上下文是用户最开始的请求
         # 使用MetaGPT标准的UserRequirement作为cause_by
@@ -351,6 +362,9 @@ class Orchestrator:
                 error_msg = f"任务 {i} '{task.description}' 的执行者 '{target_agent_id}' 不存在。"
                 print(f"❌ {error_msg}")
                 return {"status": "error", "error": error_msg}
+
+            # ProjectRepo 已在agent创建时注入，无需重复注入
+            print(f"🔧 Agent {agent.profile} 已具备 ProjectRepo 上下文。")
             
             await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"正在执行任务: {task.description}", "working")
             

@@ -198,24 +198,26 @@ class ConductCaseResearch(Action):
     Action: 撰写最终的案例研究报告并保存到文件。
     复刻自 metagpt.actions.research.ConductResearch 并增加了保存逻辑。
     """
-    async def run(self, topic: str, links: Dict[str, List[str]] = None, summaries: Dict[str, str] = None, output_dir: Path = None) -> Path:
-        summary_text = "\n\n---\n\n".join(f"**来源链接**: {url}\n\n**内容摘要**:\n{summary}" for url, summary in summaries.items())
-        
-        prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=summary_text)
-        
-        self.llm.auto_max_tokens = True
-        content = await self._aask(prompt, [CASE_RESEARCH_BASE_SYSTEM])
-        
-        # 实现您的定制化需求：保存到指定工作区
-        safe_filename = re.sub(r'[\\/:"*?<>|]+', "_", topic)[:50]
-        report_file = output_dir / f"case_report_{safe_filename}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-        
+    async def run(
+        self,
+        topic: str,
+        content: str,
+        project_repo: 'ProjectRepo',  # 引入ProjectRepo
+        system_text: str = CASE_RESEARCH_BASE_SYSTEM,
+    ) -> Path:
+        prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=content)
+        research_report = await self._aask(prompt, [system_text])
+
+        # 使用ProjectRepo获取保存路径
+        filename = f"case_research_{topic.replace(' ', '_')}.md"
+        save_path = project_repo.get_path('research/cases', filename)
+
         try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            report_file.write_text(content, encoding='utf-8')
-            logger.info(f"案例报告已保存至: {report_file}")
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(research_report)
+            logger.info(f"案例研究报告已保存至: {save_path}")
+            return save_path
         except Exception as e:
             logger.error(f"保存报告失败: {e}")
-            return content  # 即使保存失败，也返回内容
-
-        return report_file
+            raise

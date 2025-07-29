@@ -97,10 +97,17 @@ class CaseExpertAgent(Role):
                 content="", instruct_content=CaseReport(topic=topic, links=report.links, summaries=summaries), role=self.profile, cause_by=todo
             )
         elif isinstance(todo, ConductCaseResearch):
-            content = await todo.run(topic=topic, links=report.links, summaries=report.summaries, output_dir=self.cases_dir)
+            # 获取 project_repo 从上下文
+            project_repo = self.context.kwargs.get('project_repo')
+            if not project_repo:
+                raise ValueError("ProjectRepo not found in agent context!")
+            
+            summary_text = "\n\n---\n\n".join(f"**来源链接**: {url}\n\n**内容摘要**:\n{summary}" for url, summary in report.summaries.items())
+
+            report_path = await todo.run(topic=topic, content=summary_text, project_repo=project_repo)
             ret = Message(
                 content="",
-                instruct_content=CaseReport(topic=topic, links=report.links, summaries=report.summaries, content=str(content)),
+                instruct_content=CaseReport(topic=topic, links=report.links, summaries=report.summaries, content=str(report_path)),
                 role=self.profile,
                 cause_by=todo,
             )

@@ -6,3 +6,5 @@ llm:
   model: "qwen-max-latest"  # or gpt-3.5-turbo
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # or forward url / other llm url
   api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
+
+workspace: "./autowriter_workspace"  # All generated content will be stored here

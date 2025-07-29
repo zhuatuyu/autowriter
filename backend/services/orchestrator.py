@@ -376,36 +376,47 @@ class Orchestrator:
                 print(f"🔍 调试: Agent当前内存消息数: {len(agent.rc.memory.storage) if hasattr(agent, 'rc') and hasattr(agent.rc, 'memory') else 'N/A'}")
                 
                 result_message = await agent.run(last_message)
-                
-                print(f"🔍 调试: agent.run() 返回值类型: {type(result_message)}")
-                print(f"🔍 调试: agent.run() 返回值: {result_message}")
-                print(f"🔍 调试: Agent执行后内存消息数: {len(agent.rc.memory.storage) if hasattr(agent, 'rc') and hasattr(agent.rc, 'memory') else 'N/A'}")
 
-                # MetaGPT的Role.run()可能返回None（当没有新消息需要处理时）
-                # 这是正常行为，我们需要从agent的内存中获取最新的消息
-                if not result_message:
-                    print(f"🔍 调试: agent.run() 返回None，尝试从内存获取最新消息")
-                    # 从agent的内存中获取最新的消息作为结果
+                # 检查 agent.run() 的直接输出
+                if result_message and result_message.content:
+                    print(f"✅ Agent {agent.profile} 直接返回了结果。")
+                    last_message = result_message
+                else:
+                    # 如果直接输出不满足，则从内存中获取最新消息
+                    print(f"🟡 Agent {agent.profile} 未直接返回有效结果，尝试从内存中获取。")
                     try:
                         memories = agent.rc.memory.get(k=1)
-                        print(f"🔍 调试: 从内存获取到 {len(memories) if memories else 0} 条消息")
                         if memories:
-                            result_message = memories[0]
-                            print(f"🔍 调试: 使用内存中的消息作为结果: {type(result_message)}")
+                            last_message = memories[0]
+                            print(f"✅ 从内存中成功获取到最新消息。")
                         else:
-                            logger.error(f"任务 {task.id} '{task.description}' 执行后没有返回结果消息，且内存中也没有消息。")
-                            error_message = f"任务 {task.id} 执行异常，智能体未返回结果。"
-                            return {"status": "error", "error": error_message}
-                    except Exception as memory_error:
-                        print(f"🔍 调试: 访问agent内存失败: {memory_error}")
-                        logger.error(f"访问agent内存失败: {memory_error}")
-                        error_message = f"任务 {task.id} 执行异常，无法访问智能体内存。"
-                        return {"status": "error", "error": error_message}
-                
-                # 更新上下文，用于下一个任务
-                last_message = result_message
-                print(f"🔍 调试: 最终结果消息类型: {type(last_message)}, 内容: {last_message.content[:100] if hasattr(last_message, 'content') else 'N/A'}...")
-                
+                            raise ValueError("内存为空")
+                    except Exception as e:
+                        error_msg = f"任务 {task.id} '{task.description}' 执行后，既未直接返回结果，也无法从其内存中获取。错误: {e}"
+                        logger.error(error_msg)
+                        return {"status": "error", "error": f"任务 {task.id} 执行异常: {error_msg}"}
+
+                # 特殊处理：如果上一个agent是CaseExpert，它的产出是文件路径，需要读取文件内容作为下一个agent的输入
+                if isinstance(agent, CaseExpertAgent):
+                    try:
+                        # 假设CaseExpert的最终产出是一个包含文件路径的Message
+                        # content可能直接就是路径，或者在instruct_content里
+                        output_file_path_str = last_message.content
+                        output_file_path = Path(output_file_path_str)
+                        
+                        if output_file_path.exists() and output_file_path.is_file():
+                            print(f"📂 检测到案例专家产出文件: {output_file_path}，正在读取内容...")
+                            file_content = output_file_path.read_text(encoding='utf-8')
+                            # 创建一个新的Message，其content是文件内容
+                            last_message = Message(content=file_content, role='user', cause_by=type(agent))
+                            print(f"📄 已将文件内容作为新的消息传递给下一个Agent。内容长度: {len(file_content)}")
+                        else:
+                            # 如果路径无效，这是一个潜在问题
+                            print(f"⚠️ 警告: {agent.profile} 返回的消息内容 '{output_file_path_str}' 不是一个有效的文件路径。将按原样传递。")
+                    except Exception as e:
+                        print(f"⚠️ 警告: 处理 {agent.profile} 产出时出错: {e}。消息将按原样传递。")
+
+
                 await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"任务完成: {task.description}", "completed")
 
             except Exception as e:

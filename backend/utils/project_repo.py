@@ -10,7 +10,7 @@ class ProjectRepo:
         """
         self.session_id = session_id
         # 创建项目根目录：workspaces/project_{session_id}/
-        self.root = Path("workspaces") / f"project_{session_id}"
+        self.root = Path("workspaces") / f"{session_id}"
         
         # 定义标准目录结构
         self.uploads = self.root / 'uploads'
@@ -20,6 +20,7 @@ class ProjectRepo:
         self.analysis = self.root / 'analysis'
         self.design = self.root / 'design'
         self.drafts = self.root / 'drafts'
+        self.reports = self.root / 'reports'
         self.outputs = self.root / 'outputs'
 
         self._create_dirs()
@@ -34,6 +35,7 @@ class ProjectRepo:
         self.analysis.mkdir(exist_ok=True)
         self.design.mkdir(exist_ok=True)
         self.drafts.mkdir(exist_ok=True)
+        self.reports.mkdir(exist_ok=True)
         self.outputs.mkdir(exist_ok=True)
 
     def get_path(self, dir_type: str = '', filename: str = '') -> Path:
@@ -75,6 +77,7 @@ class ProjectRepo:
                 'analysis': self.analysis,
                 'design': self.design,
                 'drafts': self.drafts,
+                'reports': self.reports,
                 'outputs': self.outputs,
                 'root': self.root
             }

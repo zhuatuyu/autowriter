@@ -199,12 +199,12 @@ class ConductCaseResearch(Action):
     复刻自 metagpt.actions.research.ConductResearch 并增加了保存逻辑。
     """
     async def run(
-        self,
-        topic: str,
-        content: str,
+        self, 
+        topic: str, 
+        content: str, 
         project_repo: 'ProjectRepo',  # 引入ProjectRepo
-        system_text: str = CASE_RESEARCH_BASE_SYSTEM,
-    ) -> Path:
+        system_text: str = CASE_RESEARCH_BASE_SYSTEM, 
+    ) -> str:
         prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=content)
         research_report = await self._aask(prompt, [system_text])
 
@@ -217,7 +217,7 @@ class ConductCaseResearch(Action):
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(research_report)
             logger.info(f"案例研究报告已保存至: {save_path}")
-            return save_path
+            return str(save_path.resolve())
         except Exception as e:
             logger.error(f"保存报告失败: {e}")
             raise

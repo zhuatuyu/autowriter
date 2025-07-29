@@ -11,7 +11,6 @@ import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from backend.models.plan import Plan, Task
-from metagpt.llm import LLM
 import re
 from pydantic import ValidationError
 

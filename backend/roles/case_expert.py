@@ -3,6 +3,8 @@
 一个完全符合MetaGPT设计哲学的、由多个Action驱动的自动化案例研究智能体。
 """
 import re
+from metagpt.config2 import Config
+from metagpt.roles.role import Role
 from metagpt.roles.role import RoleReactMode
 from metagpt.schema import Message
 from metagpt.logs import logger
@@ -61,8 +63,17 @@ class CaseExpertAgent(Role):
         }
         self.search_engine = alibaba_search_engine(search_config or default_search_config)
 
-        # 4. 使用MetaGPT标准方式设置actions和react_mode
-        self.set_actions([CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch])
+        # 4. 配置长文本模型
+        qwen_long_config = Config.default()
+        qwen_long_config.llm.model = "qwen-long-latest"
+
+        # 5. 使用MetaGPT标准方式设置actions和react_mode，并为特定Action配置LLM
+        actions = [
+            CollectCaseLinks(),
+            WebBrowseAndSummarizeCase(config=qwen_long_config),
+            ConductCaseResearch(config=qwen_long_config)
+        ]
+        self.set_actions(actions)
         self._set_react_mode(RoleReactMode.BY_ORDER.value, len(self.actions))
 
 

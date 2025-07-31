@@ -159,17 +159,54 @@ class AICompany:
         try:
             logger.info(f"🔄 开始团队协作: {self.session_id}")
             
+            # 发送团队协作开始消息到前端
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(
+                    session_id=self.session_id,
+                    agent_type="system",
+                    agent_name="系统",
+                    content="🔄 开始团队协作，正在协调各个智能体工作...",
+                    status="working"
+                )
+            
             # 运行团队协作（最多10轮）
             await self.team.run(n_round=10)
             
             logger.info(f"✅ 团队协作完成: {self.session_id}")
             
-            # 移除系统完成消息，只显示ProjectManager的最终结果
+            # 发送团队协作完成消息到前端
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(
+                    session_id=self.session_id,
+                    agent_type="system",
+                    agent_name="系统",
+                    content="✅ 团队协作完成！所有智能体已完成各自的任务。",
+                    status="completed"
+                )
+            
             logger.info(f"🎉 项目协作完成！所有任务已完成。")
+            
+            # 发送项目完成消息到前端
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(
+                    session_id=self.session_id,
+                    agent_type="system",
+                    agent_name="项目管理器",
+                    content="🎉 项目协作完成！所有任务已完成，请查看工作区中的输出结果。",
+                    status="completed"
+                )
                 
         except Exception as e:
             logger.error(f"❌ 团队协作失败: {e}")
-            # 移除系统错误消息，只保留日志记录
+            # 发送错误消息到前端
+            if websocket_manager:
+                await websocket_manager.broadcast_agent_message(
+                    session_id=self.session_id,
+                    agent_type="system",
+                    agent_name="系统",
+                    content=f"❌ 团队协作失败: {str(e)}",
+                    status="error"
+                )
         finally:
             self.is_running = False
     
@@ -261,10 +298,12 @@ class AICompany:
                             profile_str = str(profile_obj) if profile_obj is not None else "unknown"
                             name_str = str(name_obj) if name_obj is not None else "Unknown"
                             
-                            # 检查是否有待执行的ask_human命令
+                            # 检查是否有待执行的RoleZero命令
                             if hasattr(current_role, 'rc') and hasattr(current_role.rc, 'todo_commands'):
                                 for command in current_role.rc.todo_commands:
-                                    if command.get('command_name') == 'RoleZero.ask_human':
+                                    command_name = command.get('command_name', '')
+                                    
+                                    if command_name == 'RoleZero.ask_human':
                                         question = command.get('args', {}).get('question', '')
                                         if question:
                                             # 发送用户交互请求到前端
@@ -279,6 +318,20 @@ class AICompany:
                                                 }
                                             )
                                             logger.info(f"📤 发送用户交互请求到前端: {question[:100]}...")
+                                            return result
+                                    
+                                    elif command_name == 'RoleZero.reply_to_human':
+                                        content = command.get('args', {}).get('content', '')
+                                        if content:
+                                            # 发送智能体回复到前端
+                                            await current_role.websocket_manager.broadcast_agent_message(
+                                                session_id=current_role.session_id,
+                                                agent_type=profile_str.lower().replace(" ", "_"),
+                                                agent_name=name_str,
+                                                content=content,
+                                                status="completed"
+                                            )
+                                            logger.info(f"📤 发送智能体回复到前端: {content[:100]}...")
                                             return result
                             
                             # 发送完成状态和结果（如果不是ask_human命令）

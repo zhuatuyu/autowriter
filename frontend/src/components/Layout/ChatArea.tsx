@@ -1,19 +1,43 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, Mic, CornerDownLeft } from 'lucide-react';
-import { useWebSocket } from '../../hooks/useWebSocket'; // 确认路径正确
-import { useParams } from 'react-router-dom';
+import { Send, Paperclip, Mic, CornerDownLeft, MessageCircle } from 'lucide-react';
+import { useWebSocket } from '../../hooks/useWebSocket';
+import { useParams, useLocation } from 'react-router-dom';
 
 const ChatArea: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
-    const { messages, sendMessage, isConnected } = useWebSocket(sessionId || 'default-session');
-    const [input, setInput] = useState('');
-    const endOfMessagesRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
+  const { messages, sendMessage, isConnected } = useWebSocket(sessionId || 'default-session');
+  const [input, setInput] = useState('');
+  const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null); // 新增：输入框引用
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 获取从创建项目页面传递的状态
+  const projectIdea = location.state?.projectIdea;
+  const uploadedFiles = location.state?.uploadedFiles;
 
   useEffect(() => {
-        endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
+    endOfMessagesRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // 当组件加载时，如果有项目想法，自动发送给后端
+  useEffect(() => {
+    if (projectIdea && isConnected) {
+      const startMessage = {
+        type: 'start_project',
+        content: projectIdea,
+        uploadedFiles: uploadedFiles || []
+      };
+      
+      sendMessage(startMessage);
+      
+      // 在聊天界面显示项目启动信息
+      console.log('项目已启动，想法:', projectIdea);
+      if (uploadedFiles && uploadedFiles.length > 0) {
+        console.log('上传的文件:', uploadedFiles);
+      }
+    }
+  }, [projectIdea, isConnected, sendMessage, uploadedFiles]);
 
     const handleSend = () => {
         if (input.trim()) {
@@ -79,10 +103,61 @@ const ChatArea: React.FC = () => {
                     <div className="space-y-6">
             {messages.map((msg, index) => (
                             <div key={index} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`p-3 rounded-lg max-w-lg ${msg.sender === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200'}`}>
-                                    {msg.sender !== 'user' && <div className="font-bold text-sm mb-1 text-indigo-300">{msg.sender}</div>}
-                                    <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
-                                </div>
+                                {/* 处理用户交互请求 */}
+                                {msg.type === 'user_interaction_request' ? (
+                                    <div className="w-full max-w-2xl bg-yellow-900/30 border border-yellow-600 rounded-lg p-4">
+                                        <div className="flex items-center mb-3">
+                                            <MessageCircle className="text-yellow-400 mr-2" size={20} />
+                                            <span className="font-bold text-yellow-400">
+                                                {msg.agent_name || 'Agent'} 需要您的回复
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-200 mb-4" style={{ whiteSpace: 'pre-wrap' }}>
+                                            {msg.question || msg.content}
+                                        </p>
+                                        <div className="flex items-center bg-gray-800 rounded-lg p-2">
+                                            <input
+                                                type="text"
+                                                placeholder="请输入您的回复..."
+                                                className="flex-1 bg-transparent text-white placeholder-gray-500 focus:outline-none px-2"
+                                                onKeyPress={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        const target = e.target as HTMLInputElement;
+                                                        if (target.value.trim()) {
+                                                            sendMessage({
+                                                                type: 'user_response',
+                                                                content: target.value.trim(),
+                                                                response_to: msg.agent_name
+                                                            });
+                                                            target.value = '';
+                                                        }
+                                                    }
+                                                }}
+                                            />
+                                            <button
+                                                onClick={(e) => {
+                                                    const input = e.currentTarget.parentElement?.querySelector('input') as HTMLInputElement;
+                                                    if (input?.value.trim()) {
+                                                        sendMessage({
+                                                            type: 'user_response',
+                                                            content: input.value.trim(),
+                                                            response_to: msg.agent_name
+                                                        });
+                                                        input.value = '';
+                                                    }
+                                                }}
+                                                className="ml-2 bg-yellow-600 text-white rounded-md p-2 hover:bg-yellow-700 focus:outline-none"
+                                            >
+                                                <Send size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className={`p-3 rounded-lg max-w-lg ${msg.sender === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-200'}`}>
+                                        {msg.sender !== 'user' && <div className="font-bold text-sm mb-1 text-indigo-300">{msg.sender}</div>}
+                                        <p className="text-sm" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
+                                    </div>
+                                )}
                             </div>
             ))}
                     </div>

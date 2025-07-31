@@ -5,6 +5,10 @@ interface WebSocketMessage {
     sender?: string;
     content: any;
     timestamp?: string;
+    agent_name?: string;
+    agent_type?: string;
+    question?: string;
+    response_to?: string;
 }
 
 export const useWebSocket = (sessionId: string) => {
@@ -50,13 +54,9 @@ export const useWebSocket = (sessionId: string) => {
                 reconnectAttemptsRef.current = 0;
                 isConnectingRef.current = false;
                 
-                // 设置连接稳定标志，延迟3秒确保连接真正稳定
-                setTimeout(() => {
-                    if (socket.current && socket.current.readyState === WebSocket.OPEN) {
-                        connectionStableRef.current = true;
-                        console.log(`WebSocket connection stable for session ${sessionId}`);
-                    }
-                }, 3000);
+                // 立即设置连接稳定标志，不需要等待
+                connectionStableRef.current = true;
+                console.log(`WebSocket connection established for session ${sessionId}`);
             };
 
             socket.current.onmessage = (event) => {
@@ -160,15 +160,21 @@ export const useWebSocket = (sessionId: string) => {
                 };
                 setMessages((prev) => [...prev, errorNotification]);
             }
-        } else if (socket.current?.readyState === WebSocket.OPEN && connectionStableRef.current) {
-            // 发送普通JSON消息
+        } else if (socket.current?.readyState === WebSocket.OPEN) {
+            // 发送普通JSON消息，不需要检查connectionStableRef
             console.log('Sending WebSocket message:', message);
             socket.current.send(JSON.stringify(message));
         } else {
             console.warn('WebSocket not ready for sending message:', {
                 readyState: socket.current?.readyState,
-                stable: connectionStableRef.current
+                sessionId: sessionId
             });
+            
+            // 如果连接未就绪，尝试重新连接
+            if (!isConnectingRef.current) {
+                console.log('Attempting to reconnect WebSocket...');
+                connect();
+            }
         }
     };
 

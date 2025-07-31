@@ -208,8 +208,15 @@ class ConductCaseResearch(Action):
         prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=content)
         research_report = await self._aask(prompt, [system_text])
 
-        # 使用ProjectRepo获取保存路径
-        filename = f"case_research_{topic.replace(' ', '_')}.md"
+        # 生成简短的文件名，避免路径过长问题
+        import hashlib
+        import time
+        
+        # 使用时间戳和topic的hash值生成简短文件名
+        timestamp = int(time.time())
+        topic_hash = hashlib.md5(topic.encode('utf-8')).hexdigest()[:8]
+        filename = f"case_research_{timestamp}_{topic_hash}.md"
+        
         save_path = project_repo.get_path('research/cases', filename)
 
         try:

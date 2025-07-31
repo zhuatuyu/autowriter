@@ -1,15 +1,14 @@
-"""
-LLM Agents Package
+"""LLM Agents Package
 Contains all the specialized agent implementations
 """
 
-from .director import DirectorAgent
+from .project_manager import ProjectManagerAgent
 from .case_expert import CaseExpertAgent
 from .writer_expert import WriterExpertAgent
 from .data_analyst import DataAnalystAgent
 
 __all__ = [
-    'DirectorAgent',
+    'ProjectManagerAgent',
     'CaseExpertAgent',
     'WriterExpertAgent',
     'DataAnalystAgent'

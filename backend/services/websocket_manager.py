@@ -18,9 +18,7 @@ class WebSocketManager:
         self.retry_tasks: Dict[str, asyncio.Task] = {}
     
     async def connect(self, websocket: WebSocket, session_id: str):
-        """接受WebSocket连接"""
-        await websocket.accept()
-        
+        """注册WebSocket连接（连接已在main.py中accept）"""
         # 如果已有连接，先关闭旧连接
         if session_id in self.connections:
             try:
@@ -30,21 +28,11 @@ class WebSocketManager:
         
         # 保存新连接
         self.connections[session_id] = websocket
-        print(f"✅ Client connected to session {session_id}")
+        print(f"✅ Client registered to session {session_id}")
         
         # 初始化消息队列（如果不存在）
         if session_id not in self.message_queues:
             self.message_queues[session_id] = deque(maxlen=100)  # 最多保存100条消息
-        
-        # 发送连接确认消息
-        await self.send_message(session_id, {
-            "type": "connection_established",
-            "session_id": session_id,
-            "message": "Connected to AutoWriter Enhanced"
-        })
-        
-        # 发送队列中的消息
-        await self._flush_message_queue(session_id)
     
     async def _flush_message_queue(self, session_id: str):
         """发送队列中的消息"""
@@ -105,18 +93,25 @@ class WebSocketManager:
         """获取指定session的连接数"""
         return 1 if session_id in self.connections else 0
     
-    async def broadcast_agent_message(self, session_id: str, agent_type: str, agent_name: str, content: str, status: str = "sent"):
+    async def broadcast_agent_message(self, session_id: str, agent_type: str, agent_name: str, content: str, status: str = "completed"):
         """广播Agent消息"""
         message = {
             "type": "agent_message",
             "agent_type": agent_type,
             "agent_name": agent_name,
+            "sender": agent_name,
             "content": content,
             "status": status,
             "timestamp": datetime.now().isoformat()
         }
-        print(f"🔥 Broadcasting agent message: {agent_name} - {content[:50]}...")
-        return await self.send_message(session_id, message)
+        
+        success = await self.send_message(session_id, message)
+        if success:
+            print(f"📤 Agent消息已发送 [{agent_name}]: {content[:50]}...")
+        else:
+            print(f"❌ Agent消息发送失败 [{agent_name}]")
+        
+        return success
     
     async def broadcast_report_update(self, session_id: str, chapter: str, content: str, version: int):
         """广播报告更新"""

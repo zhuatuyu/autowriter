@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Folder, Clock, CheckCircle, PlayCircle, PlusCircle } from 'lucide-react';
 
 interface Project {
@@ -17,6 +17,7 @@ const statusConfig = {
 };
 
 const HomePage: React.FC = () => {
+    const navigate = useNavigate();
     const [projects, setProjects] = useState<Project[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -43,11 +44,7 @@ const HomePage: React.FC = () => {
     }, []);
 
     const createNewProject = () => {
-        // 实际应用中会调用API创建新项目，并返回一个sessionId
-        // 这里我们简单地导航到一个新的UUID会话
-        const newSessionId = `project_${Date.now()}`;
-        // 使用 window.location.href 进行跳转
-        window.location.href = `/session/${newSessionId}`;
+        navigate('/create');
     };
 
   return (

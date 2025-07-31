@@ -79,7 +79,25 @@ class AnalyzeData(Action):
             return f"代码执行失败: {result}"
         
         logger.info(f"代码执行成功，输出: \n{result}")
-        return result
+        
+        # 3. 生成分析报告并保存
+        summarize_action = SummarizeAnalysis(config=self.config)
+        report = await summarize_action.run(result)
+        
+        # 4. 保存报告到文件
+        analysis_path = Path(analysis_path)
+        analysis_path.mkdir(parents=True, exist_ok=True)
+        
+        # 生成文件名（基于指令的前20个字符）
+        safe_instruction = "".join(c for c in instruction[:20] if c.isalnum() or c in (' ', '-', '_')).strip()
+        report_filename = f"analysis_report_{safe_instruction}.md"
+        report_path = analysis_path / report_filename
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report)
+        
+        logger.info(f"分析报告已保存至: {report_path}")
+        return str(report_path)
 
 class SummarizeAnalysis(Action):
     """将分析结果总结成报告"""

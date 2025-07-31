@@ -5,13 +5,25 @@ Mineru API Tool
 import aiohttp
 import asyncio
 import yaml
+import os
 from pathlib import Path
 # from metagpt.config2 import config # 暂时移除对config的依赖
 
 class MineruApiTool:
     def __init__(self):
-        # 临时硬编码API密钥和URL以解决启动时配置加载问题
-        self.api_key = "eyJ0eXBlIjoiSldUIiwiYWxnIjoiSFM1MTIifQ.eyJqdGkiOiI2MjQwNzA4MSIsInJvbCI6IlJPTEVfUkVHSVNURVIiLCJpc3MiOiJPcGVuWExhYiIsImlhdCI6MTc1MzA4MTQwMSwiY2xpZW50SWQiOiJsa3pkeDU3bnZ5MjJqa3BxOXgydyIsInBob25lIjoiMTM2MTM4NjU2MjQiLCJvcGVuSWQiOm51bGwsInV1aWQiOiJlYWUxMzhlMy00MmQ5LTRjNzEtOTI1ZC00ZGE1NWU1NTNiM2EiLCJlbWFpbCI6IiIsImV4cCI6MTc1NDI5MTAwMX0.QhQ9BFLjSsWobi4mkr4p5QPM6-lgHPAJpmeY6r0tGvbatMCV64fAnGlAbr6dlMKwytijvNhQxfMO94IU0ifLiQ"
+        # 从环境变量或配置文件获取API密钥，避免硬编码敏感信息
+        self.api_key = os.getenv('MINERU_API_KEY', '')
+        if not self.api_key:
+            # 尝试从配置文件读取
+            config_path = Path('config/mineru_config.yaml')
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f)
+                    self.api_key = config.get('api_key', '')
+        
+        if not self.api_key:
+            print("⚠️ 警告: 未找到Mineru API密钥，请设置MINERU_API_KEY环境变量或配置文件")
+        
         self.base_url = "https://mineru.net/api/v1/file/parse"
 
     async def process_url(self, url: str, is_ocr: bool = True, enable_formula: bool = False) -> str:
@@ -198,4 +210,4 @@ class MineruApiTool:
             }
 
 # 创建一个全局工具实例，方便调用
-mineru_tool = MineruApiTool() 
+mineru_tool = MineruApiTool()

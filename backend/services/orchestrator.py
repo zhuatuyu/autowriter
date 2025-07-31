@@ -15,6 +15,7 @@ from backend.roles.case_expert import CaseExpertAgent
 from backend.roles.writer_expert import WriterExpertAgent
 from backend.roles.data_analyst import DataAnalystAgent
 from backend.services.websocket_manager import WebSocketManager
+from backend.services.environment import Environment
 from backend.models.session import SessionState  # 引入会话状态枚举
 from backend.models.plan import Plan, Task  # 引入Plan和Task模型
 from metagpt.schema import Message  # 引入MetaGPT的Message类
@@ -36,7 +37,8 @@ class Orchestrator:
         self.sessions_context: Dict[str, Dict[str, Any]] = {}
         self.workspace_base = Path("workspaces")
         self.workspace_base.mkdir(exist_ok=True)
-        self.session_states: Dict[str, SessionState] = {} # 新增：用于跟踪每个会话的状态
+        self.session_states: Dict[str, SessionState] = {}
+        self.environments: Dict[str, Environment] = {}
 
         print("✅ 增强版核心管理器(协调器模式)初始化完成")
     
@@ -68,8 +70,8 @@ class Orchestrator:
             }
             self.session_states[session_id] = SessionState.IDLE # 同步到独立的状态跟踪器
             
-            # 创建Agent团队
-            await self._create_agent_team(session_id)
+            # 创建 Environment 和 Agent 团队
+            await self._create_environment_and_agents(session_id)
             
             print(f"✅ 会话 {session_id} 启动成功，当前状态: {self.session_states[session_id].value}")
             return True
@@ -96,7 +98,7 @@ class Orchestrator:
             print(f"❌ 检查现有项目失败: {e}")
             return False
     
-    async def _create_agent_team(self, session_id: str):
+    async def _create_environment_and_agents(self, session_id: str):
         """根据新架构创建完整的Agent团队"""
         try:
             session_context = self.sessions_context[session_id]
@@ -112,17 +114,18 @@ class Orchestrator:
 
             # 2. 创建专业Agent团队，并注入ProjectRepo
             for agent_id, agent_class in AGENT_TEAM_CONFIG.items():
-                # 创建context并注入ProjectRepo
-                from metagpt.context import Context
-                context = Context()
-                context.kwargs.set('project_repo', project_repo)
-                
-                # 使用context创建agent
-                agent = agent_class(context=context)
+                # 直接创建agent
+                agent = agent_class()
+                # 直接设置project_repo属性（与测试中一致）
+                agent.project_repo = project_repo
                 agents[agent_id] = agent
                 print(f"  ✅ 创建Agent: {agent.profile} ({agent.name}) - 已注入ProjectRepo")
             
             self.sessions_context[session_id]['agents'] = agents
+            # 创建并存储 Environment
+            environment = Environment()
+            environment.add_roles(list(agents.values()))
+            self.environments[session_id] = environment
             
         except Exception as e:
             print(f"❌ 创建Agent团队失败: {e}")
@@ -193,8 +196,12 @@ class Orchestrator:
             
             await websocket_manager.broadcast_agent_message(session_id, "system", "Orchestrator", f"收到您的确认！计划已启动，共 {len(plan_to_execute.tasks)} 个步骤，开始执行...", "working")
             
-            # 调用新的执行逻辑
-            execution_result = await self._execute_plan(session_id, plan_to_execute, websocket_manager)
+            # 执行计划中的任务
+            try:
+                execution_result = await self._execute_plan_tasks(session_id, plan_to_execute, websocket_manager)
+            except Exception as e:
+                print(f"❌ 任务执行过程中发生错误: {e}")
+                execution_result = {"status": "error", "error": str(e)}
             
             if execution_result.get("status") == "completed":
                 self._set_session_state(session_id, SessionState.COMPLETED)
@@ -339,95 +346,166 @@ class Orchestrator:
         print(f"🧠 用户意图被分类为: {intent}")
         return intent
 
-    # _handle_direct_answer, _handle_new_request, _handle_plan_feedback 这些旧方法将被删除
-
-    async def _execute_plan(self, session_id: str, plan: Plan, websocket_manager) -> Dict[str, Any]:
-        """
-        Orchestrator的核心执行逻辑：按顺序执行计划中的每个任务
-        """
-        print(f"🚀 {session_id} Orchestrator 开始执行计划: {plan.goal}")
+    async def _execute_plan_tasks(self, session_id: str, plan, websocket_manager) -> Dict[str, Any]:
+        """使用MetaGPT Environment执行计划任务，包含手动触发逻辑"""
         session_context = self.sessions_context[session_id]
-        project_repo = session_context.get('project_repo') # 获取 project_repo
         
-        # 初始上下文是用户最开始的请求
-        # 使用MetaGPT标准的UserRequirement作为cause_by
-        from metagpt.actions.add_requirement import UserRequirement
-        last_message = Message(content=plan.goal, role="user", cause_by=UserRequirement)
-
-        for i, task in enumerate(plan.tasks, 1):
-            target_agent_id = task.agent
-            agent = session_context['agents'].get(target_agent_id)
-
-            if not agent:
-                error_msg = f"任务 {i} '{task.description}' 的执行者 '{target_agent_id}' 不存在。"
-                print(f"❌ {error_msg}")
-                return {"status": "error", "error": error_msg}
-
-            # ProjectRepo 已在agent创建时注入，无需重复注入
-            print(f"🔧 Agent {agent.profile} 已具备 ProjectRepo 上下文。")
+        print(f"🚀 开始执行计划，共 {len(plan.tasks)} 个任务")
+        
+        try:
+            # 获取已创建的Environment
+            environment = self.environments.get(session_id)
+            if not environment:
+                print("❌ 找不到Environment，重新创建")
+                await self._create_environment_and_agents(session_id)
+                environment = self.environments.get(session_id)
             
-            await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"正在执行任务: {task.description}", "working")
+            # 将用户需求作为初始消息发布到环境
+            from metagpt.schema import Message
+            from metagpt.actions.add_requirement import UserRequirement
             
-            try:
-                # 按照MetaGPT标准做法：直接调用 agent.run(message)
-                # 让 Role 自己管理内存和 Action 流程
-                print(f"🔍 调试: 准备调用 {agent.profile}.run() 方法")
-                print(f"🔍 调试: 传入消息类型: {type(last_message)}, 内容: {last_message.content[:100]}...")
-                print(f"🔍 调试: Agent当前内存消息数: {len(agent.rc.memory.storage) if hasattr(agent, 'rc') and hasattr(agent.rc, 'memory') else 'N/A'}")
-                
-                result_message = await agent.run(last_message)
-
-                # 检查 agent.run() 的直接输出
-                if result_message and result_message.content:
-                    print(f"✅ Agent {agent.profile} 直接返回了结果。")
-                    last_message = result_message
-                else:
-                    # 如果直接输出不满足，则从内存中获取最新消息
-                    print(f"🟡 Agent {agent.profile} 未直接返回有效结果，尝试从内存中获取。")
+            # 构建包含完整计划的用户需求
+            plan_content = plan.model_dump_json()
+            
+            initial_message = Message(
+                content=plan_content,
+                role="Director", 
+                cause_by=DirectorAgent
+            )
+            
+            # 将消息发布到环境中
+            environment.publish_message(initial_message)
+            print("📨 计划已发送给Director")
+            
+            # 获取所有智能体
+            agents = session_context['agents']
+            agent_roles = [agents.get('case_expert'), agents.get('data_analyst'), agents.get('writer_expert')]
+            agent_roles = [role for role in agent_roles if role is not None]
+            
+            # 添加调试信息：检查智能体是否接收到消息
+            print("\n🔍 检查智能体消息接收状态:")
+            for role in agent_roles:
+                print(f"  {role.profile}: 消息数={len(role.rc.memory.storage)}, 新消息数={len(role.rc.news)}")
+                if role.rc.news:
+                    print(f"    最新消息来源: {role.rc.news[0].cause_by}")
+                    print(f"    消息内容长度: {len(role.rc.news[0].content)}")
+            
+            # 手动触发智能体的_think和_act方法
+            for role in agent_roles:
+                if role.rc.news:
+                    print(f"\n🤖 手动触发 {role.profile} 的思考和行动...")
                     try:
-                        memories = agent.rc.memory.get(k=1)
-                        if memories:
-                            last_message = memories[0]
-                            print(f"✅ 从内存中成功获取到最新消息。")
-                        else:
-                            raise ValueError("内存为空")
-                    except Exception as e:
-                        error_msg = f"任务 {task.id} '{task.description}' 执行后，既未直接返回结果，也无法从其内存中获取。错误: {e}"
-                        logger.error(error_msg)
-                        return {"status": "error", "error": f"任务 {task.id} 执行异常: {error_msg}"}
-
-                # 特殊处理：如果上一个agent是CaseExpert，它的产出是文件路径，需要读取文件内容作为下一个agent的输入
-                if isinstance(agent, CaseExpertAgent):
-                    try:
-                        # 假设CaseExpert的最终产出是一个包含文件路径的Message
-                        # content可能直接就是路径，或者在instruct_content里
-                        output_file_path_str = last_message.content
-                        output_file_path = Path(output_file_path_str)
+                        # 调用_think方法
+                        should_act = await role._think()
+                        print(f"  {role.profile}._think() 返回: {should_act}")
                         
-                        if output_file_path.exists() and output_file_path.is_file():
-                            print(f"📂 检测到案例专家产出文件: {output_file_path}，正在读取内容...")
-                            file_content = output_file_path.read_text(encoding='utf-8')
-                            # 创建一个新的Message，其content是文件内容
-                            last_message = Message(content=file_content, role='user', cause_by=type(agent))
-                            print(f"📄 已将文件内容作为新的消息传递给下一个Agent。内容长度: {len(file_content)}")
+                        if should_act and role.rc.todo:
+                            # 调用_act方法
+                            print(f"  {role.profile} 开始执行 {role.rc.todo}")
+                            result = await role._act()
+                            print(f"  {role.profile}._act() 完成，结果: {type(result)}")
+                            
+                            # 检查是否需要继续执行下一个action
+                            if hasattr(role, 'actions') and len(role.actions) > 1:
+                                current_action_index = role.actions.index(role.rc.todo) if role.rc.todo in role.actions else 0
+                                if current_action_index < len(role.actions) - 1:
+                                    # 设置下一个action
+                                    role.rc.todo = role.actions[current_action_index + 1]
+                                    print(f"  {role.profile}: 设置下一个action为 {role.rc.todo}")
+                                    
+                                    # 继续执行下一个action
+                                    act_result2 = await role._act()
+                                    print(f"  {role.profile}._act() 第二次完成，结果: {type(act_result2)}")
+                                    
+                                    # 如果还有第三个action
+                                    if current_action_index + 1 < len(role.actions) - 1:
+                                        role.rc.todo = role.actions[current_action_index + 2]
+                                        print(f"  {role.profile}: 设置第三个action为 {role.rc.todo}")
+                                        act_result3 = await role._act()
+                                        print(f"  {role.profile}._act() 第三次完成，结果: {type(act_result3)}")
                         else:
-                            # 如果路径无效，这是一个潜在问题
-                            print(f"⚠️ 警告: {agent.profile} 返回的消息内容 '{output_file_path_str}' 不是一个有效的文件路径。将按原样传递。")
+                            print(f"  {role.profile} 没有需要执行的任务")
                     except Exception as e:
-                        print(f"⚠️ 警告: 处理 {agent.profile} 产出时出错: {e}。消息将按原样传递。")
+                        print(f"  {role.profile} 执行出错: {e}")
+                        import traceback
+                        traceback.print_exc()
+            
+            # 运行Environment直到所有智能体完成工作
+            max_rounds = 20  # 防止无限循环
+            completed_rounds = 0
+            
+            for round_num in range(max_rounds):
+                print(f"\n--- 执行轮次 {round_num + 1} ---")
+                
+                # 检查所有角色状态
+                all_idle = True
+                for agent_id, agent in agents.items():
+                    msg_count = len(agent.rc.memory.get())
+                    is_idle = agent.is_idle if hasattr(agent, 'is_idle') else True
+                    print(f"  {agent_id}: 消息数={msg_count}, 空闲={is_idle}")
+                    if not is_idle:
+                        all_idle = False
+                
+                # 运行一轮
+                await environment.run(k=1)
+                completed_rounds += 1
+                
+                # 广播进度
+                await websocket_manager.broadcast_agent_message(
+                    session_id, "system", "Environment", 
+                    f"执行轮次 {round_num + 1} 完成", "working"
+                )
+                
+                # 如果所有角色都空闲，停止执行
+                if all_idle and round_num > 0:  # 至少运行一轮
+                    print("  所有角色都已空闲，执行完成")
+                    break
+            
+            # 检查输出文件
+            project_repo = session_context.get('project_repo')
+            output_files = []
+            
+            if project_repo:
+                # 检查reports目录
+                reports_dir = project_repo.get_path("reports")
+                if reports_dir.exists():
+                    report_files = list(reports_dir.glob("*.md"))
+                    output_files.extend([f.name for f in report_files])
+                
+                # 检查其他可能的输出目录
+                for subdir in ["analysis", "research", "drafts", "outputs", "design", "cases"]:
+                    subdir_path = project_repo.get_path(subdir)
+                    if subdir_path.exists():
+                        files = list(subdir_path.glob("*.*"))
+                        output_files.extend([f"{subdir}/{f.name}" for f in files])
+            
+            print(f"✅ Environment执行完成，运行了 {completed_rounds} 轮")
+            if output_files:
+                print(f"📄 生成的文件: {output_files}")
+            
+            return {
+                "status": "completed",
+                "completed_rounds": completed_rounds,
+                "total_rounds": max_rounds,
+                "output_files": output_files,
+                "environment_status": "success"
+            }
+            
+        except Exception as e:
+            print(f"❌ Environment执行过程中发生错误: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            return {
+                "status": "error",
+                "error": str(e),
+                "environment_status": "failed"
+            }
+    
+    # 移除不再需要的任务排序和单任务执行方法
+    # 现在使用MetaGPT Environment的标准执行流程
 
 
-                await websocket_manager.broadcast_agent_message(session_id, agent.profile, agent.name, f"任务完成: {task.description}", "completed")
-
-            except Exception as e:
-                error_msg = f"任务 {i} '{task.description}' 执行失败: {e}"
-                print(f"❌ {error_msg}")
-                import traceback
-                traceback.print_exc()
-                return {"status": "error", "error": error_msg}
-
-        print(f"✅ {session_id} 计划执行完成")
-        return {"status": "completed", "final_result": last_message.content}
 
     def _format_plan_for_approval(self, plan: Any) -> str:
         """将Plan对象格式化为易于用户理解的字符串"""

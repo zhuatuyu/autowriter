@@ -4,14 +4,15 @@
 """
 import re
 from metagpt.config2 import Config
-from metagpt.roles.role import Role
-from metagpt.roles.role import RoleReactMode
+import json
+from metagpt.roles.role import Role, RoleReactMode
 from metagpt.schema import Message
 from metagpt.logs import logger
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
-from metagpt.roles.role import Role
+from backend.roles.director import DirectorAgent # 引入DirectorAgent以进行类型检查
+from backend.models.plan import Plan # 引入Plan模型
 from backend.actions.case_research import (
     CollectCaseLinks, 
     WebBrowseAndSummarizeCase, 
@@ -36,8 +37,8 @@ class CaseExpertAgent(Role):
     """
     def __init__(
         self, 
-        name: str = "CaseExpert", 
-        profile: str = "CaseExpert", 
+        name: str = "王磊", 
+        profile: str = "case_expert", 
         goal: str = "搜索、分析并提供与项目相关的深度案例研究报告",
         search_config: dict = None, # 允许外部传入搜索配置
         **kwargs
@@ -74,8 +75,54 @@ class CaseExpertAgent(Role):
             ConductCaseResearch(config=qwen_long_config)
         ]
         self.set_actions(actions)
-        self._set_react_mode(RoleReactMode.BY_ORDER.value, len(self.actions))
+        # 监听 DirectorAgent 的消息
+        self._watch([DirectorAgent])
+        # 设置为 REACT 模式，以便 _think 方法可以被调用
+        self._set_react_mode(RoleReactMode.REACT.value)
 
+
+    async def _think(self) -> bool:
+        """思考如何响应观察到的消息，并设置下一步的动作"""
+        logger.info(f"{self.profile}: _think 方法被调用，新消息数={len(self.rc.news)}")
+        
+        if not self.rc.news:
+            logger.info(f"{self.profile}: 没有新消息")
+            return False
+
+        # 只处理最新的计划消息
+        msg = self.rc.news[0]
+        logger.info(f"{self.profile}: 处理消息，来源={msg.cause_by}")
+        
+        # 检查消息来源，使用字符串包含检查
+        if 'DirectorAgent' not in str(msg.cause_by):
+            logger.info(f"{self.profile}: 消息不是来自DirectorAgent，实际来源={msg.cause_by}, 类型={type(msg.cause_by).__name__}")
+            return False
+
+        # 解析计划
+        try:
+            plan_data = json.loads(msg.content)
+            plan = Plan(**plan_data)
+            
+            # 查找分配给case_expert的任务
+            case_tasks = [task for task in plan.tasks if task.agent == "case_expert"]
+            logger.info(f"{self.profile}: 找到 {len(case_tasks)} 个分配给我的任务")
+            
+            if not case_tasks:
+                logger.info(f"{self.profile}: 没有分配给我的任务")
+                return False
+                
+            # 设置第一个任务
+            self.task_topic = case_tasks[0].description
+            logger.info(f"{self.profile}: 接收到任务 - {self.task_topic}")
+            
+            # 设置第一个Action
+            self.rc.todo = self.actions[0]  # CollectCaseLinks
+            logger.info(f"{self.profile}: 设置todo为 {self.rc.todo}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"{self.profile}: 解析计划失败 - {e}")
+            return False
 
     async def _act(self) -> Message:
         """
@@ -91,7 +138,7 @@ class CaseExpertAgent(Role):
             report = msg.instruct_content
             topic = report.topic
         else:
-            topic = msg.content
+            topic = getattr(self, 'task_topic', msg.content)
             report = CaseReport(topic=topic)
 
         # 根据当前Action执行不同操作，模仿Researcher的逻辑
@@ -108,8 +155,8 @@ class CaseExpertAgent(Role):
                 content="", instruct_content=CaseReport(topic=topic, links=report.links, summaries=summaries), role=self.profile, cause_by=todo
             )
         elif isinstance(todo, ConductCaseResearch):
-            # 获取 project_repo 从上下文
-            project_repo = self.context.kwargs.get('project_repo')
+            # 获取 project_repo 从角色属性
+            project_repo = getattr(self, 'project_repo', None)
             if not project_repo:
                 raise ValueError("ProjectRepo not found in agent context!")
             

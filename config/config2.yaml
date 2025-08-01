@@ -7,4 +7,11 @@ llm:
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # or forward url / other llm url
   api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
 
-workspace: "./autowriter_workspace"  # All generated content will be stored here
+# 搜索引擎配置
+search:
+  api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
+  endpoint: "https://ecs-fc-search.aliyuncs.com/2023-03-13/services/fc-search-demo/functions/search_function/invocations"
+  workspace: "default"
+  service_id: "fc-search-demo"
+
+# workspace: "./autowriter_workspace"  # All generated content will be stored here

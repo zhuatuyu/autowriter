@@ -15,6 +15,9 @@ class AlibabaSearchWrapper:
     """
     def __init__(self, api_key: str, endpoint: str, workspace: str, service_id: str):
         self.api_key = api_key
+        # 修正URL构建方式，确保与阿里云OpenSearch API兼容
+        if endpoint.endswith('/'):
+            endpoint = endpoint[:-1]
         self.base_url = f"{endpoint}/v3/openapi/workspaces/{workspace}/web-search/{service_id}"
 
     async def run(self, query: str, max_results: int = 5, as_string: bool = False) -> Union[str, List[Dict]]:
@@ -87,4 +90,4 @@ def alibaba_search_engine(config: dict) -> SearchEngine:
             )
             self.run_func = self.engine_class.run
     
-    return AlibabaSearch() 
+    return AlibabaSearch()

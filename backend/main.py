@@ -22,6 +22,7 @@ from backend.models.session import WorkSession, AgentMessage
 from backend.services.startup import startup_manager
 print("🚀 StartupManager is Running")
 
+from backend.services.persistence import ProjectPersistence
 from backend.services.websocket_manager import WebSocketManager
 from backend.services.api import router as workspace_router
 
@@ -36,8 +37,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 全局管理器
+# 全局实例
 websocket_manager = WebSocketManager()
+persistence_manager = ProjectPersistence("./workspaces")
 
 # 注册工作区API路由
 app.include_router(workspace_router)
@@ -451,6 +453,57 @@ async def start_intelligent_workflow(request: dict):
     except Exception as e:
         print(f"❌ 启动智能项目总监工作流程失败: {e}")
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/projects/recoverable")
+async def get_recoverable_projects():
+    """获取可恢复的项目列表"""
+    try:
+        projects = persistence_manager.list_recoverable_projects()
+        return {"success": True, "projects": projects}
+    except Exception as e:
+        logger.error(f"获取可恢复项目失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/projects/recover/{session_id}")
+async def recover_project(session_id: str):
+    """恢复指定项目"""
+    try:
+        state = persistence_manager.load_project_state(session_id)
+        if not state:
+            return {"success": False, "error": "项目状态不存在"}
+        
+        # 创建新的Company实例并恢复状态
+        company = Company(session_id)
+        
+        # 启动恢复流程
+        user_requirement = state.get("user_requirement", "恢复的项目")
+        success = await company.start_project(user_requirement, websocket_manager)
+        
+        if success:
+            sessions[session_id] = company
+            return {"success": True, "message": "项目恢复成功", "state": state}
+        else:
+            return {"success": False, "error": "项目恢复失败"}
+            
+    except Exception as e:
+        logger.error(f"恢复项目失败: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.delete("/api/projects/{session_id}")
+async def delete_project_state(session_id: str):
+    """删除项目状态"""
+    try:
+        success = persistence_manager.delete_project_state(session_id)
+        if success:
+            # 同时从内存中移除
+            if session_id in sessions:
+                del sessions[session_id]
+            return {"success": True, "message": "项目状态已删除"}
+        else:
+            return {"success": False, "error": "项目状态不存在"}
+    except Exception as e:
+        logger.error(f"删除项目状态失败: {e}")
+        return {"success": False, "error": str(e)}
 
 @app.post("/api/sessions/start-iterative")  
 async def start_iterative_workflow(request: dict):

@@ -43,14 +43,16 @@ class CaseExpertAgent(Role):
     def __init__(self, search_config: dict = None, **kwargs):
         super().__init__(**kwargs)
         
-        # 1. 配置搜索引擎（使用环境变量或配置文件）
-        default_search_config = {
-            "api_key": os.getenv('SEARCH_API_KEY', ''),
-            "endpoint": "https://ecs-fc-search.aliyuncs.com/2023-03-13/services/fc-search-demo/functions/search_function/invocations",
+        # 1. 直接配置搜索引擎（写死配置，暂不考虑安全性）
+        alibaba_search_config = {
+            "api_key": "OS-ykkz87t4q83335yl",
+            "endpoint": "http://default-0t01.platform-cn-shanghai.opensearch.aliyuncs.com",
             "workspace": "default",
-            "service_id": "fc-search-demo"
+            "service_id": "ops-web-search-001"
         }
-        self.search_engine = alibaba_search_engine(search_config or default_search_config)
+        
+        logger.info(f"使用阿里云搜索引擎，配置: {alibaba_search_config}")
+        self.search_engine = alibaba_search_engine(alibaba_search_config)
 
         # 2. 配置长文本模型
         qwen_long_config = Config.default()

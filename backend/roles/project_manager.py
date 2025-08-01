@@ -6,8 +6,10 @@ from metagpt.roles.di.role_zero import RoleZero
 from metagpt.schema import Message
 from metagpt.logs import logger
 from metagpt.actions.add_requirement import UserRequirement
+from metagpt.actions.project_management import WriteTasks
 from metagpt.utils.common import any_to_str
 
+# 为了兼容性，保留Plan和相关Action的导入
 from backend.models.plan import Plan, Task
 from backend.actions.director_action import CreatePlan, RevisePlan
 
@@ -16,24 +18,24 @@ class ProjectManagerAgent(RoleZero):
     """
     ProjectManager智能体 - 项目管理器
     完全模仿MetaGPT的project_manager.py实现，继承RoleZero
-    负责分析用户需求，制定项目计划，协调各个专业智能体的工作
+    使用MetaGPT原生的WriteTasks Action来处理任务分配
     """
-    name: str = "ProjectManager"
-    profile: str = "Project Manager"
+    name: str = "吴丽"
+    profile: str = "Project_Manager"
     goal: str = "制定项目计划并协调团队执行"
     constraints: str = "确保计划的可行性和团队协作的高效性"
     
     # RoleZero特有配置 - 完全按照MetaGPT标准设置
-    instruction: str = """Use CreatePlan and RevisePlan tools to create and manage project plans"""
-    max_react_loop: int = 10  # 恢复合理的循环次数
-    tools: list[str] = ["CreatePlan", "RevisePlan", "RoleZero"]
+    instruction: str = """Use WriteTasks tool to write a project task list"""
+    max_react_loop: int = 1  # 按照MetaGPT原生设置
+    tools: list[str] = ["Editor:write,read,similarity_search", "RoleZero", "WriteTasks"]
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
         # 关键：按照MetaGPT标准设置
-        self.enable_memory = False  # 禁用记忆，避免循环
-        self.set_actions([CreatePlan])  # 设置主要Action
+        self.enable_memory = False  # 禁用内存
+        self.set_actions([WriteTasks])  # 使用MetaGPT原生的WriteTasks
         self._watch([UserRequirement])  # 监听用户需求
         
         # 团队能力配置
@@ -45,28 +47,10 @@ class ProjectManagerAgent(RoleZero):
 
     def _update_tool_execution(self):
         """更新工具执行映射，RoleZero的标准方法"""
-        create_plan = CreatePlan()
-        revise_plan = RevisePlan()
-        
+        wt = WriteTasks()
         self.tool_execution_map.update({
-            "CreatePlan.run": lambda user_request: create_plan.run(
-                user_request=user_request, 
-                agent_capabilities=self.agent_capabilities
-            ),
-            "CreatePlan": lambda user_request: create_plan.run(
-                user_request=user_request, 
-                agent_capabilities=self.agent_capabilities
-            ),
-            "RevisePlan.run": lambda original_plan, user_feedback: revise_plan.run(
-                original_plan=original_plan,
-                user_feedback=user_feedback,
-                agent_capabilities=self.agent_capabilities
-            ),
-            "RevisePlan": lambda original_plan, user_feedback: revise_plan.run(
-                original_plan=original_plan,
-                user_feedback=user_feedback,
-                agent_capabilities=self.agent_capabilities
-            ),
+            "WriteTasks.run": wt.run,
+            "WriteTasks": wt.run,  # alias
         })
 
     async def process_request(self, user_message: str) -> Plan:

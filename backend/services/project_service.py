@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-from backend.models.project import Project
+# from backend.models.project import Project
 
 
 class ProjectService:

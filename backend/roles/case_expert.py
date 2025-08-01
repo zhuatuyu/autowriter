@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from backend.roles.project_manager import ProjectManagerAgent
 
 from backend.actions.case_research import CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch
-from backend.models.plan import Plan, Task
-from backend.tools.search_engine_alibaba import alibaba_search_engine
+from metagpt.tools.search_engine import SearchEngine
+from metagpt.config2 import config
 
 class CaseReport(BaseModel):
     """用于在研究流程中传递结构化数据的模型，模仿researcher.py中的Report"""
@@ -40,19 +40,32 @@ class CaseExpertAgent(Role):
     constraints: str = "确保信息的准确性和相关性"
     language: str = "zh-cn"
 
-    def __init__(self, search_config: dict = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # 1. 直接配置搜索引擎（写死配置，暂不考虑安全性）
-        alibaba_search_config = {
-            "api_key": "OS-ykkz87t4q83335yl",
-            "endpoint": "http://default-0t01.platform-cn-shanghai.opensearch.aliyuncs.com",
-            "workspace": "default",
-            "service_id": "ops-web-search-001"
+        # 1. 从config2.yaml加载搜索配置并初始化SearchEngine
+        search_config = config.search
+        if not search_config or not search_config.api_key:
+            raise ValueError("Search config with api_key is not configured in config2.yaml")
+
+        # 从 params 字典中提取阿里云搜索所需的特定参数
+        alibaba_params = search_config.params or {}
+
+        search_engine_kwargs = {
+            "api_key": search_config.api_key,
+            "api_type": search_config.api_type,
+            "endpoint": alibaba_params.get("endpoint"),
+            "workspace": alibaba_params.get("workspace"),
+            "service_id": alibaba_params.get("service_id")
         }
-        
-        logger.info(f"使用阿里云搜索引擎，配置: {alibaba_search_config}")
-        self.search_engine = alibaba_search_engine(alibaba_search_config)
+
+        # 如果是阿里云搜索，检查必需参数是否存在
+        if search_config.api_type == "alibaba":
+            for key in ["endpoint", "workspace", "service_id"]:
+                if not search_engine_kwargs[key]:
+                    raise ValueError(f"Alibaba search requires '{key}' in search.params of config2.yaml")
+
+        self.search_engine = SearchEngine(**search_engine_kwargs)
 
         # 2. 配置长文本模型
         qwen_long_config = Config.default()

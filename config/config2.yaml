@@ -7,11 +7,10 @@ llm:
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # or forward url / other llm url
   api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
 
-# 搜索引擎配置
+# 搜索配置
 search:
-  api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
-  endpoint: "https://ecs-fc-search.aliyuncs.com/2023-03-13/services/fc-search-demo/functions/search_function/invocations"
+  api_type: "alibaba"  # 使用阿里云搜索引擎
+  api_key: "OS-ykkz87t4q83335yl"
+  endpoint: "http://default-0t01.platform-cn-shanghai.opensearch.aliyuncs.com"
   workspace: "default"
-  service_id: "fc-search-demo"
-
-# workspace: "./autowriter_workspace"  # All generated content will be stored here
+  service_id: "ops-web-search-001"

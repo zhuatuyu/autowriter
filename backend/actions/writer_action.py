@@ -6,6 +6,7 @@ from metagpt.llm import LLM
 from metagpt.provider.base_llm import BaseLLM
 from typing import List
 from metagpt.schema import Message
+from metagpt.utils.project_repo import ProjectRepo
 
 
 class WriteContent(Action):
@@ -14,7 +15,7 @@ class WriteContent(Action):
     """
     name: str = "WriteContent"
 
-    async def run(self, topic: str, summary: str, project_repo=None) -> str:
+    async def run(self, topic: str, summary: str, project_repo: ProjectRepo = None) -> str:
         prompt = f"""# 指令：内容创作
 
 **角色**: 你是资深内容创作者 **张翰**。
@@ -34,7 +35,10 @@ class WriteContent(Action):
         # 如果提供了project_repo，保存内容到文件
         if project_repo:
             filename = f"写作报告_{topic.replace(' ', '_')}.md"
-            project_repo.save_file(filename, content, "reports")
+            save_path = project_repo.workdir / "reports" / filename
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(content)
             
         return content
 
@@ -66,7 +70,7 @@ class PolishContent(Action):
     """
     name: str = "PolishContent"
 
-    async def run(self, content: str, project_repo=None) -> str:
+    async def run(self, content: str, project_repo: ProjectRepo = None) -> str:
         prompt = f"""# 指令：内容润色
 
 请对以下文本进行润色，使其语言更流畅、表达更专业、更具说服力。可以调整语序、更换词汇、优化句式，但不要改变原文的核心意思。
@@ -83,7 +87,10 @@ class PolishContent(Action):
         # 如果提供了project_repo，保存润色后的内容
         if project_repo:
             filename = f"润色内容_{hash(content) % 10000}.md"
-            project_repo.save_file(filename, polished_content, "reports")
+            save_path = project_repo.workdir / "reports" / filename
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(polished_content)
             
         return polished_content
 
@@ -94,7 +101,7 @@ class ReviewContent(Action):
     """
     name: str = "ReviewContent"
 
-    async def run(self, content: str, project_repo=None) -> str:
+    async def run(self, content: str, project_repo: ProjectRepo = None) -> str:
         prompt = f"""# 指令：内容审核与最终完善
 
 请从以下几个维度，对提供的文本内容进行审核，并输出最终完善的版本：
@@ -115,6 +122,9 @@ class ReviewContent(Action):
         # 如果提供了project_repo，保存最终内容
         if project_repo:
             filename = f"最终报告_{hash(content) % 10000}.md"
-            project_repo.save_file(filename, final_content, "reports")
+            save_path = project_repo.workdir / "reports" / filename
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(final_content)
             
         return final_content

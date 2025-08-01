@@ -6,6 +6,7 @@ from metagpt.actions import Action
 from metagpt.logs import logger
 from metagpt.utils.common import CodeParser
 from metagpt.actions.di.execute_nb_code import ExecuteNbCode
+from metagpt.utils.project_repo import ProjectRepo
 
 DATA_ANALYST_NAME = "赵丽娅"
 

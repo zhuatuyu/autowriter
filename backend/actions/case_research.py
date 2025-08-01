@@ -2,7 +2,7 @@
 """
 案例研究Action集合
 *完全* 模仿MetaGPT中 `research.py` 的设计，移植其成熟的逻辑和Prompt工程，
-仅进行最小化改造以适应“案例研究”的特定需求。
+仅进行最小化改造以适应"案例研究"的特定需求。
 """
 import asyncio
 import re
@@ -19,6 +19,7 @@ from metagpt.utils.common import OutputParser
 from metagpt.utils.parse_html import WebPage
 from metagpt.utils.text import generate_prompt_chunk, reduce_message_length
 from pydantic import TypeAdapter
+from metagpt.utils.project_repo import ProjectRepo
 
 # --- 为案例研究定制的Prompts (直接从research.py移植和微调) ---
 
@@ -26,7 +27,7 @@ CASE_RESEARCH_BASE_SYSTEM = """你是一名专业的AI案例研究员。你的�
 CASE_RESEARCH_TOPIC_SYSTEM = "你是一名AI案例研究员，你的研究主题是:\n#主题#\n{topic}"
 SEARCH_TOPIC_PROMPT = """请根据你的研究主题，提供最多2个必要的关键词用于网络搜索。你的回应必须是JSON格式，例如：["关键词1", "关键词2"]。"""
 SUMMARIZE_SEARCH_PROMPT = """### 要求
-1. 你的研究主题和初步搜索结果展示在“参考信息”部分。
+1. 你的研究主题和初步搜索结果展示在"参考信息"部分。
 2. 请基于这些信息，生成最多 {decomposition_nums} 个与研究主题相关的、更具体的调查问题。
 3. 你的回应必须是JSON格式：["问题1", "问题2", "问题3", ...]。
 
@@ -46,9 +47,9 @@ COLLECT_AND_RANKURLS_PROMPT = """### 主题
 以JSON格式提供排序后结果的索引，例如 [0, 1, 3, 4, ...]，不要包含其他任何文字。
 """
 WEB_BROWSE_AND_SUMMARIZE_PROMPT = """### 要求
-1. 利用“参考信息”中的文本来回答问题“{query}”。
+1. 利用"参考信息"中的文本来回答问题"{query}"。
 2. 如果无法直接回答，但内容与研究主题相关，请对文本进行全面总结。
-3. 如果内容完全不相关，请回复“不相关”。
+3. 如果内容完全不相关，请回复"不相关"。
 4. 包含所有相关的事实信息、数据、统计等。
 
 ### 参考信息
@@ -58,7 +59,7 @@ CONDUCT_CASE_RESEARCH_PROMPT = """### 参考信息
 {content}
 
 ### 要求
-请根据以上参考信息，撰写一份关于主题“{topic}”的详细案例研究报告。报告必须满足以下要求：
+请根据以上参考信息，撰写一份关于主题"{topic}"的详细案例研究报告。报告必须满足以下要求：
 
 - 聚焦于直接回应主题。
 - 结构清晰，深度分析，论据充分。
@@ -202,7 +203,7 @@ class ConductCaseResearch(Action):
         self, 
         topic: str, 
         content: str, 
-        project_repo: 'ProjectRepo',  # 引入ProjectRepo
+        project_repo: ProjectRepo,  # 使用MetaGPT原生的ProjectRepo
         system_text: str = CASE_RESEARCH_BASE_SYSTEM, 
     ) -> str:
         prompt = CONDUCT_CASE_RESEARCH_PROMPT.format(topic=topic, content=content)
@@ -217,7 +218,8 @@ class ConductCaseResearch(Action):
         topic_hash = hashlib.md5(topic.encode('utf-8')).hexdigest()[:8]
         filename = f"case_research_{timestamp}_{topic_hash}.md"
         
-        save_path = project_repo.get_path('research/cases', filename)
+        # 使用MetaGPT原生的项目路径
+        save_path = project_repo.workdir / "research" / "cases" / filename
 
         try:
             save_path.parent.mkdir(parents=True, exist_ok=True)

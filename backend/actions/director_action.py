@@ -7,7 +7,7 @@ from metagpt.provider.base_llm import BaseLLM
 from typing import Dict, List, Optional, Any
 import json
 import re
-from backend.models.plan import Plan
+# from backend.models.plan import Plan
 from pydantic import ValidationError
 from metagpt.logs import logger
 

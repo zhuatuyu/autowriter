@@ -1,116 +1,85 @@
 """
-📊 数据分析师（赵丽娅） - 完全模仿MetaGPT engineer.py的REACT模式实现
-负责数据分析和可视化，采用标准的think-act循环
+数据分析师（赵丽娅） - 数据分析专家
+完全符合MetaGPT设计哲学的数据分析智能体
 """
-import asyncio
-import json
-from pathlib import Path
-from typing import Dict, Any, List, TYPE_CHECKING
-
+from metagpt.roles.role import Role
 from metagpt.schema import Message
 from metagpt.logs import logger
-from metagpt.roles.role import Role, RoleContext, RoleReactMode
-from metagpt.config2 import Config
-
-# 使用TYPE_CHECKING避免循环导入
-if TYPE_CHECKING:
-    from backend.roles.project_manager import ProjectManagerAgent
-
-from backend.models.plan import Plan
 from backend.actions.data_analyst_action import AnalyzeData, SummarizeAnalysis
-from backend.utils.project_repo import ProjectRepo
+
 
 class DataAnalystAgent(Role):
     """
-    📊 数据分析师（赵丽娅） - 虚拟办公室的数据专家 (重构后)
+    数据分析师（赵丽娅） - 数据分析专家
+    负责分析用户上传的数据文件并生成分析报告
     """
-    def __init__(self, name: str = "赵丽娅", profile: str = "data_analyst", goal: str = "根据用户指令，分析数据文件并生成报告", **kwargs):
-        qwen_long_config = Config.default()
-        qwen_long_config.llm.model = "qwen3-coder-plus"
-        
-        kwargs.pop('config', None)
-        super().__init__(name=name, profile=profile, goal=goal, actions=[AnalyzeData(), SummarizeAnalysis()], config=qwen_long_config, **kwargs)
-        self._watch(["ProjectManagerAgent"])
-        self._set_react_mode(react_mode=RoleReactMode.REACT.value)
+    
+    name: str = "赵丽娅"
+    profile: str = "data_analyst"
+    goal: str = "根据用户指令，分析数据文件并生成报告"
+    constraints: str = "确保数据分析的准确性和可解释性"
+    language: str = "zh-cn"
 
+    def __init__(self, name: str = "赵丽娅", profile: str = "data_analyst", goal: str = "根据用户指令，分析数据文件并生成报告", **kwargs):
+        super().__init__(**kwargs)
+        
+        # 设置actions
+        actions = [AnalyzeData(), SummarizeAnalysis()]
+        self.set_actions(actions)
+        
+        # 监听项目管理和用户需求
+        self._watch(["ProjectManagerAgent", "UserRequirement"])
 
     async def _think(self) -> bool:
-        if not self.rc.news:
-            return False
-
-        msg = self.rc.news[0]
-        # 处理来自ProjectManagerAgent的计划消息
-        if msg.cause_by == "ProjectManagerAgent":
-            try:
-                plan_data = json.loads(msg.content)
-                plan = Plan(**plan_data)
-                
-                # 查找分配给data_analyst的任务
-                analyst_tasks = [task for task in plan.tasks if task.agent == "data_analyst"]
-                if analyst_tasks:
-                    self.task_topic = analyst_tasks[0].description
-                    logger.info(f"{self.profile}: 接收到任务 - {self.task_topic}")
-                    # 设置第一个Action：AnalyzeData
-                    self.rc.todo = self.actions[0]  # AnalyzeData
-                    return True
-                else:
-                    logger.info(f"{self.profile}: 没有分配给我的任务")
-                    return False
-                    
-            except Exception as e:
-                logger.error(f"{self.profile}: 解析计划失败 - {e}")
-                return False
+        """思考阶段：分析当前任务"""
+        msg = self.rc.memory.get(k=1)[0]
+        
+        # 检查是否是数据分析任务
+        if "数据分析" in msg.content or "分析数据" in msg.content or "上传" in msg.content:
+            logger.info(f"{self.name} 识别到数据分析任务")
+            return True
+            
+        return False
 
     async def _act(self) -> Message:
-        logger.info(f"{self._setting}: to do {self.rc.todo}")
-        todo = self.rc.todo
-
+        """执行阶段：执行数据分析任务"""
+        msg = self.rc.memory.get(k=1)[0]
+        
+        # 获取项目仓库
         project_repo = getattr(self, 'project_repo', None)
         if not project_repo:
-            raise ValueError("ProjectRepo not found in agent context!")
-
-        # 使用任务描述而不是解析消息内容
-        task_description = getattr(self, 'task_topic', '分析数据')
+            logger.error("ProjectRepo not found in agent context!")
+            return Message(content="数据分析失败：缺少项目仓库", role=self.profile)
         
-        # 构建分析产出路径
-        analysis_path = project_repo.get_path('analysis')
-        analysis_path.mkdir(exist_ok=True)
-
-        # 顺序执行Action
-        if isinstance(todo, AnalyzeData):
-            # 1. 分析数据
-            analysis_result = await todo.run(
-                instruction=task_description,
-                file_path=None,  # 暂时不需要具体文件
+        try:
+            # 查找上传的数据文件
+            uploads_path = project_repo.get_path('uploads')
+            if not uploads_path.exists():
+                return Message(content="未找到上传的数据文件", role=self.profile)
+            
+            # 查找数据文件（CSV、Excel等）
+            data_files = list(uploads_path.glob("*.csv")) + list(uploads_path.glob("*.xlsx")) + list(uploads_path.glob("*.xls"))
+            
+            if not data_files:
+                return Message(content="未找到可分析的数据文件", role=self.profile)
+            
+            # 使用第一个找到的数据文件
+            data_file = data_files[0]
+            analysis_path = project_repo.get_path('analysis')
+            
+            # 执行数据分析
+            analyze_action = AnalyzeData()
+            report_path = await analyze_action.run(
+                instruction="请对数据进行全面分析，包括描述性统计、数据质量检查、关键指标分析等",
+                file_path=data_file,
                 analysis_path=analysis_path
             )
-            # 设置下一个Action
-            self.rc.todo = self.actions[1]  # SummarizeAnalysis
-            # 将结果传递给下一个Action
-            ret = Message(content=str(analysis_result), role="assistant", cause_by=AnalyzeData)
-
-        elif isinstance(todo, SummarizeAnalysis):
-            # 2. 总结分析
-            # 上一个Action的结果在记忆中
-            analysis_result = self.rc.memory.get(k=1)[0].content
-            report = await todo.run(analysis_result=analysis_result)
             
-            # 保存报告
-            report_path = analysis_path / f"analysis_report_{task_description[:20]}.md"
-            with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(report)
-            logger.info(f"分析报告已保存至: {report_path}")
+            return Message(
+                content=f"数据分析完成，报告已保存至：{report_path}",
+                role=self.profile
+            )
             
-            # 任务完成，清空todo
-            self.rc.todo = None
-            ret = Message(content=f"数据分析任务完成：{str(report_path)}", role="assistant", cause_by=SummarizeAnalysis)
-
-        else:
-            # 默认或错误状态
-            logger.warning(f"未知的todo: {type(todo)}")
-            # 任务完成，清空todo以避免循环
-            self.rc.todo = None
-            ret = Message(content="任务执行出现未知错误。", role="assistant")
-
-        self.rc.memory.add(ret)
-        return ret
+        except Exception as e:
+            logger.error(f"数据分析失败: {e}")
+            return Message(content=f"数据分析失败: {str(e)}", role=self.profile)

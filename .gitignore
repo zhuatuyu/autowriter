@@ -108,8 +108,7 @@ md
 # Example datasetspos)
 example/easy-dataset/
 example/joyagent-jdgenie-main
-example/MetaGPT_bak
-example/MetaGPT
+
 
 # Temporles
 *.tmp

@@ -57,11 +57,12 @@ class Company:
         if project_id in self.teams:
             return self.teams[project_id]
         
-        # 创建项目仓库 - 使用MetaGPT原生的项目路径
-        workspace_path = Path(f"workspaces/{project_id}")
+        # 使用项目根目录下的 'workspace' 作为存储路径
+        workspace_path = Path("workspace") / project_id
         workspace_path.mkdir(parents=True, exist_ok=True)
         
-        project_repo = ProjectRepo(workspace_path)
+        # 创建项目仓库，并设置src路径以对齐原生用法
+        project_repo = ProjectRepo(workspace_path).with_src_path(workspace_path)
         self.project_repos[project_id] = project_repo
         
         # 创建智能体团队
@@ -71,15 +72,17 @@ class Company:
         case_expert = CaseExpertAgent()
         data_analyst = DataAnalystAgent()
         writer_expert = WriterExpertAgent()
+
+        # 手动为需要访问文件的智能体注入 project_repo
+        case_expert.project_repo = project_repo
+        data_analyst.project_repo = project_repo
+        writer_expert.project_repo = project_repo
         
-        # 为每个智能体设置项目仓库
-        for agent in [team_leader, project_manager, architect, case_expert, data_analyst, writer_expert]:
-            agent.project_repo = project_repo
-        
-        # 创建团队并雇佣成员 - 适配MetaGPT v2
+        # 创建团队并雇佣成员
         team = Team(
             investment=10.0,
-            environment=environment
+            environment=environment,
+            project_repo=project_repo  # 显式传递project_repo
         )
         team.hire([team_leader, project_manager, architect, case_expert, data_analyst, writer_expert])
         

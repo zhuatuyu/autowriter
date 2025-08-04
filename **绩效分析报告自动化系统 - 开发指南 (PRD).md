@@ -16,7 +16,7 @@
 ```mermaid
 sequenceDiagram
     participant User
-    participant ProductManager
+    participant ProductManager self._watch([UserRequirement, PrepareDocuments])
     participant Architect
     participant ProjectManager
     participant WriterExpert

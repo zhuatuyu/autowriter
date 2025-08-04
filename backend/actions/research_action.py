@@ -199,8 +199,8 @@ class ConductComprehensiveResearch(Action):
     async def run(
         self, 
         topic: str,
-        decomposition_nums: int = 3,
-        url_per_query: int = 3,
+        decomposition_nums: int = 1,  # 测试模式: 3->2
+        url_per_query: int = 1,       # 测试模式: 3->2
         project_repo: ProjectRepo = None,
         local_docs: Documents = None
     ) -> ResearchData:
@@ -230,11 +230,13 @@ class ConductComprehensiveResearch(Action):
         research_data = ResearchData(brief=brief, vector_store_path=vector_store_path)
 
         if project_repo:
-            brief_path = project_repo.docs_path / f"{topic}_research_brief.md"
-            await project_repo.save(
-                filename=str(brief_path.relative_to(project_repo.workdir)),
-                content=brief
-            )
+            # 使用docs仓库来保存研究简报
+            import re
+            safe_topic = re.sub(r'[<>:"/\\|?*\'"]', '_', topic)  # 替换文件系统不支持的字符
+            safe_topic = safe_topic.replace(' ', '_')  # 替换空格
+            docs_filename = f"{safe_topic}_research_brief.md"
+            await project_repo.docs.save(filename=docs_filename, content=brief)
+            brief_path = project_repo.docs.workdir / docs_filename
             logger.info(f"研究简报已保存到: {brief_path}")
 
         return research_data

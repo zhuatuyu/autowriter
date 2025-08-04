@@ -3,7 +3,7 @@
 自定义团队领导者 - 配置了正确的搜索引擎
 """
 from metagpt.roles.di.team_leader import TeamLeader
-from metagpt.actions.search_enhanced_qa import SearchEnhancedQA
+from backend.actions.robust_search_action import RobustSearchEnhancedQA
 from metagpt.actions.research import CollectLinks
 from metagpt.config2 import config
 from metagpt.tools.search_engine import SearchEngine
@@ -34,8 +34,8 @@ class CustomTeamLeader(TeamLeader):
         # 创建正确配置的 CollectLinks
         self.collect_links_action = CollectLinks(search_engine=self.search_engine)
 
-        # 创建 SearchEnhancedQA 并注入配置好的 CollectLinks
-        self.search_enhanced_qa_action = SearchEnhancedQA(collect_links_action=self.collect_links_action)
+        # 创建健壮的SearchEnhancedQA并注入配置好的CollectLinks
+        self.search_enhanced_qa_action = RobustSearchEnhancedQA(collect_links_action=self.collect_links_action)
         
         # 调用更新工具执行映射
         self._update_tool_execution()

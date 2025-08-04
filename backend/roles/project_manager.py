@@ -7,7 +7,7 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from backend.actions.pm_action import CreateTaskPlan, TaskPlan
-from backend.actions.architect_action import ReportStructure, DesignReportStructure
+from backend.actions.architect_action import ReportStructure, DesignReportStructure as ArchitectAction
 
 
 class ProjectManager(Role):
@@ -26,7 +26,7 @@ class ProjectManager(Role):
         self.set_actions([CreateTaskPlan])
         
         # 监听Architect的报告结构
-        self._watch([DesignReportStructure])
+        self._watch([ArchitectAction])
 
     async def _act(self) -> Message:
         """
@@ -36,7 +36,7 @@ class ProjectManager(Role):
         
         if isinstance(todo, CreateTaskPlan):
             # 从记忆中获取报告结构
-            structure_msgs = self.rc.memory.get_by_action(DesignReportStructure)
+            structure_msgs = self.rc.memory.get_by_action(ArchitectAction)
             
             if not structure_msgs:
                 logger.error("未找到报告结构数据")
@@ -44,11 +44,25 @@ class ProjectManager(Role):
             
             # 获取最新的报告结构
             structure_msg = structure_msgs[-1]
-            if not hasattr(structure_msg, 'instruct_content') or not isinstance(structure_msg.instruct_content, ReportStructure):
+            if not hasattr(structure_msg, 'instruct_content') or not structure_msg.instruct_content:
                 logger.error("报告结构数据格式不正确")
                 return Message(content="报告结构数据格式不正确", role=self.profile)
             
-            report_structure = structure_msg.instruct_content
+            # 解析instruct_content中的ReportStructure数据
+            try:
+                # instruct_content是动态生成的Pydantic对象，需要转换为ReportStructure
+                if hasattr(structure_msg.instruct_content, 'title'):
+                    # 直接使用动态对象的属性构造ReportStructure
+                    report_structure = ReportStructure(
+                        title=structure_msg.instruct_content.title,
+                        sections=structure_msg.instruct_content.sections
+                    )
+                else:
+                    logger.error("instruct_content格式不正确，缺少title属性")
+                    return Message(content="报告结构数据格式不正确", role=self.profile)
+            except Exception as e:
+                logger.error(f"解析报告结构失败: {e}")
+                return Message(content="解析报告结构失败", role=self.profile)
             logger.info(f"ProjectManager开始创建任务计划，基于结构: {report_structure.title}")
             
             # 执行任务计划创建

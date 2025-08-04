@@ -77,9 +77,10 @@ class Company:
         project_manager = PM()
         writer_expert = WriterExpert()
 
-        # 为需要访问文件的智能体注入 project_repo
-        product_manager.project_repo = project_repo
-        writer_expert.project_repo = project_repo
+        # 为需要访问文件的智能体注入 project_repo (使用私有属性避免序列化问题)
+        product_manager._project_repo = project_repo
+        architect._project_repo = project_repo
+        writer_expert._project_repo = project_repo
         
         # 创建团队
         team = Team(
@@ -204,9 +205,9 @@ class Company:
             # 启动消息监控
             monitor_task = asyncio.create_task(self._monitor_team_messages(team))
             
-            # 启动团队任务
+            # 启动团队任务 (增加轮次确保所有智能体都能参与)
             logger.info("🔄 启动团队SOP流程...")
-            team_task = asyncio.create_task(team.run(n_round=1))
+            team_task = asyncio.create_task(team.run(n_round=5))
             
             # 等待团队完成
             await team_task

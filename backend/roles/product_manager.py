@@ -21,7 +21,7 @@ class ProductManager(Role):
     profile: str = "Product Manager"
     goal: str = "分析用户需求，进行市场和案例研究，输出研究简报"
     constraints: str = "必须进行充分的研究，确保简报内容详实、准确"
-    project_repo: object = None
+    _project_repo: object = None  # 使用私有属性避免序列化问题
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -74,6 +74,7 @@ class ProductManager(Role):
                     instruct_data = latest_user_msg.instruct_content
                     if 'docs' in instruct_data:
                         docs_data = instruct_data['docs']
+                        from backend.actions.research_action import Document
                         docs = [Document(**doc_data) for doc_data in docs_data]
                         local_docs = Documents(docs=docs)
                 elif isinstance(latest_user_msg.instruct_content, Documents):
@@ -88,7 +89,7 @@ class ProductManager(Role):
             # 执行综合研究，包含本地文档
             research_data = await todo.run(
                 topic=user_requirement,
-                project_repo=self.project_repo,
+                project_repo=self._project_repo,
                 local_docs=local_docs  # 传递本地文档
             )
             
@@ -97,7 +98,7 @@ class ProductManager(Role):
                 content=f"研究完成: {research_data.brief[:200]}...",
                 role=self.profile,
                 cause_by=type(todo),
-                instruct_content=Message.create_instruct_value(research_data)
+                instruct_content=Message.create_instruct_value(research_data.model_dump())
             )
             
             logger.info(f"ProductManager完成研究，向量索引路径: {research_data.vector_store_path}")
@@ -105,15 +106,15 @@ class ProductManager(Role):
         
         elif isinstance(todo, PrepareDocuments):
             # 如果是PrepareDocuments任务，处理上传的文档
-            if self.project_repo:
-                uploads_path = Path(self.project_repo.workdir) / "uploads"
+            if self._project_repo:
+                uploads_path = Path(self._project_repo.workdir) / "uploads"
                 documents = await todo.run(uploads_path)
                 
                 msg = Message(
                     content=f"文档准备完成，共处理 {len(documents.docs)} 个文档",
                     role=self.profile,
                     cause_by=type(todo),
-                    instruct_content=Message.create_instruct_value(documents)
+                    instruct_content=Message.create_instruct_value(documents.model_dump())
                 )
                 
                 logger.info(f"PrepareDocuments完成，处理了 {len(documents.docs)} 个文档")

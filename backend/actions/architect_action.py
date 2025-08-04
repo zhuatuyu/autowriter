@@ -27,6 +27,12 @@ class MetricAnalysisTable(BaseModel):
     data_json: str = Field(..., description="存储指标分析结果的DataFrame (JSON格式)")
 
 
+class ArchitectOutput(BaseModel):
+    """Architect输出的复合数据结构"""
+    report_structure: ReportStructure = Field(..., description="报告结构设计")
+    metric_analysis_table: MetricAnalysisTable = Field(..., description="指标分析表")
+
+
 class DesignReportStructure(Action):
     """
     设计报告结构Action - Architect的核心能力

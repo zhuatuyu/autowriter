@@ -88,14 +88,21 @@ async def simple_sop_test():
             
         # 简单的成功判断
         has_files = project_path.exists() and len(list(project_path.glob("*.md"))) > 0
-        has_content = len(result) > 100
+        
+        # 检查是否有实质性内容 - 检查文件总大小
+        total_file_size = 0
+        if project_path.exists():
+            for file_path in project_path.glob("*.md"):
+                total_file_size += file_path.stat().st_size
+        
+        has_content = total_file_size > 5000  # 至少5KB的内容
         reasonable_time = execution_time < 300  # 5分钟内
         
         success = has_files and has_content and reasonable_time
         
         print(f"\n🎯 测试结果:")
         print(f"  📁 生成文件: {'✅' if has_files else '❌'}")
-        print(f"  📝 有效内容: {'✅' if has_content else '❌'}")
+        print(f"  📝 有效内容: {'✅' if has_content else '❌'} ({total_file_size/1024:.1f}KB)")
         print(f"  ⏱️ 执行时间: {'✅' if reasonable_time else '❌'} ({execution_time:.1f}s)")
         print(f"  🎉 总体结果: {'✅ 成功' if success else '❌ 失败'}")
         

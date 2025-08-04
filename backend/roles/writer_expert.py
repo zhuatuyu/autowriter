@@ -9,7 +9,7 @@ from metagpt.logs import logger
 from backend.actions.writer_action import WriteSection, IntegrateReport
 from backend.actions.pm_action import CreateTaskPlan, TaskPlan, Task
 from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
-from backend.actions.architect_action import DesignReportStructure as ArchitectAction, MetricAnalysisTable
+from backend.actions.architect_action import DesignReportStructure as ArchitectAction, MetricAnalysisTable, ArchitectOutput
 
 
 class WriterExpert(Role):
@@ -52,14 +52,39 @@ class WriterExpert(Role):
             research_data_msg = research_data_msgs[-1]
             metric_table_msg = None
             
-            # 寻找包含MetricAnalysisTable的消息
+            # 寻找包含MetricAnalysisTable的消息（现在和ReportStructure合并在一起）
             memories = self.get_memories()
-            for msg in memories:
-                if (hasattr(msg, 'instruct_content') and msg.instruct_content and 
-                    hasattr(msg.instruct_content, 'metric_id') or 
-                    (isinstance(msg.instruct_content, dict) and 'metric_id' in str(msg.instruct_content))):
-                    metric_table_msg = msg
-                    break
+            logger.info(f"🔍 开始搜索MetricAnalysisTable，总消息数: {len(memories)}")
+            
+            for i, msg in enumerate(memories):
+                logger.info(f"消息 {i}: cause_by={msg.cause_by}, has_instruct_content={hasattr(msg, 'instruct_content')}")
+                if hasattr(msg, 'instruct_content') and msg.instruct_content:
+                    logger.info(f"消息 {i} instruct_content类型: {type(msg.instruct_content)}")
+                    # 按照原生MetaGPT模式检查ArchitectOutput
+                    if isinstance(msg.instruct_content, ArchitectOutput):
+                        logger.info(f"消息 {i} 找到ArchitectOutput对象!")
+                        metric_table_msg = msg
+                        logger.info(f"✅ 找到ArchitectOutput数据: {type(msg.instruct_content)}")
+                        break
+                    # 检查动态生成的对象
+                    elif hasattr(msg.instruct_content, 'metric_analysis_table'):
+                        logger.info(f"消息 {i} 找到包含metric_analysis_table的对象!")
+                        metric_table_msg = msg
+                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
+                        break
+                    # 保持向后兼容性 - 检查直接的data_json
+                    elif hasattr(msg.instruct_content, 'data_json'):
+                        logger.info(f"消息 {i} 找到data_json属性!")
+                        metric_table_msg = msg
+                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
+                        break
+                    elif isinstance(msg.instruct_content, dict) and 'data_json' in msg.instruct_content:
+                        logger.info(f"消息 {i} 在字典中找到data_json键!")
+                        metric_table_msg = msg
+                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
+                        break
+                    else:
+                        logger.info(f"消息 {i} instruct_content内容: {str(msg.instruct_content)[:200]}...")
             
             if not metric_table_msg:
                 logger.warning("未找到MetricAnalysisTable数据")
@@ -103,10 +128,31 @@ class WriterExpert(Role):
             # 获取指标数据
             metric_data = "{}"  # 默认空JSON
             if hasattr(metric_table_msg, 'instruct_content') and metric_table_msg.instruct_content:
-                if hasattr(metric_table_msg.instruct_content, 'data_json'):
-                    metric_data = metric_table_msg.instruct_content.data_json
-                elif isinstance(metric_table_msg.instruct_content, dict):
-                    metric_data = str(metric_table_msg.instruct_content)
+                instruct_content = metric_table_msg.instruct_content
+                
+                # 按照原生MetaGPT模式处理ArchitectOutput
+                if isinstance(instruct_content, ArchitectOutput):
+                    metric_data = instruct_content.metric_analysis_table.data_json
+                    logger.info(f"✅ 从ArchitectOutput获取metric_data")
+                # 处理动态生成的对象
+                elif hasattr(instruct_content, 'metric_analysis_table'):
+                    metric_table = instruct_content.metric_analysis_table
+                    if hasattr(metric_table, 'data_json'):
+                        metric_data = metric_table.data_json
+                        logger.info(f"✅ 从动态对象获取metric_data")
+                    else:
+                        metric_data = str(metric_table)
+                        logger.info(f"✅ 从动态对象获取metric_data (字符串格式)")
+                # 保持向后兼容性
+                elif hasattr(instruct_content, 'data_json'):
+                    metric_data = instruct_content.data_json
+                    logger.info(f"✅ 从直接data_json属性获取metric_data")
+                elif isinstance(instruct_content, dict) and 'data_json' in instruct_content:
+                    metric_data = instruct_content['data_json']
+                    logger.info(f"✅ 从字典data_json键获取metric_data")
+                elif isinstance(instruct_content, dict):
+                    metric_data = str(instruct_content)
+                    logger.info(f"✅ 使用整个字典作为metric_data")
             
             # 为每个任务生成章节内容
             sections = []

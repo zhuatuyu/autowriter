@@ -8,7 +8,7 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
-from backend.actions.architect_action import DesignReportStructure as ArchitectAction
+from backend.actions.architect_action import DesignReportStructure as ArchitectAction, ArchitectOutput
 
 class Architect(Role):
     """
@@ -109,25 +109,21 @@ class Architect(Role):
                     logger.error(f"保存Architect输出文件失败: {e}")
             
             # 创建包含ReportStructure的消息，供ProjectManager使用
-            msg = Message(
-                content=f"报告结构设计完成：{report_structure.title}，共{len(report_structure.sections)}个章节",
-                role=self.profile,
-                cause_by=type(todo),
-                sent_from=self,
-                instruct_content=Message.create_instruct_value(report_structure.model_dump())
+            # 创建复合输出对象，按照原生MetaGPT模式
+            architect_output = ArchitectOutput(
+                report_structure=report_structure,
+                metric_analysis_table=metric_table
             )
             
-            # 也需要保存MetricAnalysisTable供WriterExpert使用
-            metric_msg = Message(
-                content=f"指标分析表生成完成",
+            msg = Message(
+                content=f"报告结构设计完成：{report_structure.title}，共{len(report_structure.sections)}个章节；指标分析表生成完成",
                 role=self.profile,
                 cause_by=type(todo),
                 sent_from=self,
-                instruct_content=Message.create_instruct_value(metric_table.model_dump())
+                instruct_content=architect_output  # 直接传递Pydantic对象，像原生代码一样
             )
             
             self.rc.memory.add(msg)
-            self.rc.memory.add(metric_msg)
             return msg
         else:
             # 如果不是DesignReportStructure，使用原有逻辑

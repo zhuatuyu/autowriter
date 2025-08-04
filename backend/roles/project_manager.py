@@ -7,7 +7,7 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from backend.actions.pm_action import CreateTaskPlan, TaskPlan
-from backend.actions.architect_action import ReportStructure, DesignReportStructure as ArchitectAction
+from backend.actions.architect_action import ReportStructure, DesignReportStructure as ArchitectAction, ArchitectOutput
 
 
 class ProjectManager(Role):
@@ -50,15 +50,40 @@ class ProjectManager(Role):
             
             # 解析instruct_content中的ReportStructure数据
             try:
-                # instruct_content是动态生成的Pydantic对象，需要转换为ReportStructure
-                if hasattr(structure_msg.instruct_content, 'title'):
-                    # 直接使用动态对象的属性构造ReportStructure
+                instruct_content = structure_msg.instruct_content
+                
+                # 按照原生MetaGPT模式解析ArchitectOutput
+                if isinstance(instruct_content, ArchitectOutput):
+                    # 直接从ArchitectOutput对象获取
+                    report_structure = instruct_content.report_structure
+                    logger.info(f"✅ 从ArchitectOutput获取ReportStructure: {report_structure.title}")
+                elif hasattr(instruct_content, 'report_structure'):
+                    # 处理动态生成的对象（MetaGPT可能会转换Pydantic对象）
                     report_structure = ReportStructure(
-                        title=structure_msg.instruct_content.title,
-                        sections=structure_msg.instruct_content.sections
+                        title=instruct_content.report_structure.title,
+                        sections=instruct_content.report_structure.sections
                     )
+                    logger.info(f"✅ 从动态对象获取ReportStructure: {report_structure.title}")
+                elif hasattr(instruct_content, 'title'):
+                    # 向后兼容：直接的ReportStructure对象
+                    report_structure = ReportStructure(
+                        title=instruct_content.title,
+                        sections=instruct_content.sections
+                    )
+                    logger.info(f"✅ 从直接对象解析ReportStructure: {report_structure.title}")
+                elif isinstance(instruct_content, dict) and 'title' in instruct_content:
+                    # 向后兼容：字典格式的ReportStructure
+                    report_structure = ReportStructure(
+                        title=instruct_content['title'],
+                        sections=instruct_content['sections']
+                    )
+                    logger.info(f"✅ 从字典解析ReportStructure: {report_structure.title}")
                 else:
-                    logger.error("instruct_content格式不正确，缺少title属性")
+                    logger.error(f"instruct_content格式不正确，内容: {str(instruct_content)[:200]}...")
+                    logger.error(f"instruct_content类型: {type(instruct_content)}")
+                    logger.error(f"instruct_content是否为字典: {isinstance(instruct_content, dict)}")
+                    if isinstance(instruct_content, dict):
+                        logger.error(f"instruct_content键列表: {list(instruct_content.keys())}")
                     return Message(content="报告结构数据格式不正确", role=self.profile)
             except Exception as e:
                 logger.error(f"解析报告结构失败: {e}")

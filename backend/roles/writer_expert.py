@@ -7,9 +7,9 @@ from metagpt.schema import Message
 from metagpt.logs import logger
 
 from backend.actions.writer_action import WriteSection, IntegrateReport
-from backend.actions.pm_action import TaskPlan, Task
-from backend.actions.research_action import ResearchData
-from backend.actions.architect_action import MetricAnalysisTable
+from backend.actions.pm_action import CreateTaskPlan, TaskPlan, Task
+from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
+from backend.actions.architect_action import DesignReportStructure as ArchitectAction, MetricAnalysisTable
 
 
 class WriterExpert(Role):
@@ -25,48 +25,130 @@ class WriterExpert(Role):
         super().__init__(**kwargs)
         
         self.set_actions([WriteSection, IntegrateReport])
-        self._watch([TaskPlan, ResearchData, MetricAnalysisTable])
+        self._watch([CreateTaskPlan, ConductComprehensiveResearch, ArchitectAction])
 
     async def _act(self) -> Message:
         """
         执行WriterExpert的核心逻辑
         """
-        # 检查是否有所有必需的数据
-        task_plan_msgs = self.rc.memory.get_by_action(TaskPlan)
-        research_data_msgs = self.rc.memory.get_by_action(ResearchData)
-        metric_table_msgs = self.rc.memory.get_by_action(MetricAnalysisTable)
+        logger.info("📝 WriterExpert开始执行写作任务...")
+        
+        # 检查是否有所有必需的数据 - 从instruct_content获取
+        task_plan_msgs = self.rc.memory.get_by_action(CreateTaskPlan)
+        research_data_msgs = self.rc.memory.get_by_action(ConductComprehensiveResearch)  
+        metric_table_msgs = self.rc.memory.get_by_action(ArchitectAction)
+        
+        logger.info(f"检查数据: TaskPlan={len(task_plan_msgs) if task_plan_msgs else 0}, "
+                   f"ResearchData={len(research_data_msgs) if research_data_msgs else 0}, "
+                   f"MetricTable={len(metric_table_msgs) if metric_table_msgs else 0}")
         
         if not all([task_plan_msgs, research_data_msgs, metric_table_msgs]):
             logger.warning("等待所有必需数据...")
             return Message(content="等待数据中...", cause_by=WriteSection)
         
         try:
-            # 解析所有数据
-            task_plan = TaskPlan.model_validate_json(task_plan_msgs[-1].content)
-            research_data = ResearchData.model_validate_json(research_data_msgs[-1].content)
-            metric_table = MetricAnalysisTable.model_validate_json(metric_table_msgs[-1].content)
+            # 解析所有数据 - 从instruct_content获取
+            task_plan_msg = task_plan_msgs[-1]
+            research_data_msg = research_data_msgs[-1]
+            metric_table_msg = None
             
-            logger.info(f"开始写作报告，共 {len(task_plan.tasks)} 个章节")
+            # 寻找包含MetricAnalysisTable的消息
+            memories = self.get_memories()
+            for msg in memories:
+                if (hasattr(msg, 'instruct_content') and msg.instruct_content and 
+                    hasattr(msg.instruct_content, 'metric_id') or 
+                    (isinstance(msg.instruct_content, dict) and 'metric_id' in str(msg.instruct_content))):
+                    metric_table_msg = msg
+                    break
+            
+            if not metric_table_msg:
+                logger.warning("未找到MetricAnalysisTable数据")
+                return Message(content="等待指标数据...", cause_by=WriteSection)
+            
+            # 获取实际数据
+            if hasattr(task_plan_msg, 'instruct_content') and task_plan_msg.instruct_content:
+                task_plan = task_plan_msg.instruct_content
+            else:
+                logger.warning("TaskPlan数据格式不正确")
+                return Message(content="任务计划数据格式错误", cause_by=WriteSection)
+                
+            if hasattr(research_data_msg, 'instruct_content') and research_data_msg.instruct_content:
+                research_data = research_data_msg.instruct_content  
+            else:
+                research_brief = research_data_msg.content
+                research_data = {"brief": research_brief}
+            
+            # 处理task_plan数据
+            if hasattr(task_plan, 'tasks'):
+                tasks = task_plan.tasks
+                title = getattr(task_plan, 'title', '绩效分析报告')
+            elif isinstance(task_plan, dict) and 'tasks' in task_plan:
+                tasks = task_plan['tasks']
+                title = task_plan.get('title', '绩效分析报告')
+            else:
+                # 如果没有找到tasks，创建一个默认的任务
+                logger.warning("未找到有效的task_plan，使用默认任务")
+                tasks = [{"section_title": "综合分析", "description": "基于研究数据的综合分析"}]
+                title = "绩效分析报告"
+            
+            logger.info(f"开始写作报告：{title}，共 {len(tasks)} 个章节")
+            
+            # 获取研究数据路径
+            vector_store_path = None
+            if hasattr(research_data, 'vector_store_path'):
+                vector_store_path = research_data.vector_store_path
+            elif isinstance(research_data, dict):
+                vector_store_path = research_data.get('vector_store_path')
+            
+            # 获取指标数据
+            metric_data = "{}"  # 默认空JSON
+            if hasattr(metric_table_msg, 'instruct_content') and metric_table_msg.instruct_content:
+                if hasattr(metric_table_msg.instruct_content, 'data_json'):
+                    metric_data = metric_table_msg.instruct_content.data_json
+                elif isinstance(metric_table_msg.instruct_content, dict):
+                    metric_data = str(metric_table_msg.instruct_content)
             
             # 为每个任务生成章节内容
             sections = []
             write_action = WriteSection()
             
-            for task in task_plan.tasks:
-                section_content = await write_action.run(
-                    task=task,
-                    vector_store_path=research_data.vector_store_path,
-                    metric_table_json=metric_table.data_json
-                )
-                sections.append(section_content)
-                logger.info(f"完成章节: {task.section_title}")
+            for i, task in enumerate(tasks):
+                try:
+                    task_obj = task if hasattr(task, 'section_title') else Task(
+                        section_title=task.get('section_title', f'章节{i+1}'),
+                        description=task.get('description', '分析内容')
+                    )
+                    
+                    section_content = await write_action.run(
+                        task=task_obj,
+                        vector_store_path=vector_store_path,
+                        metric_table_json=metric_data
+                    )
+                    sections.append(section_content)
+                    logger.info(f"完成章节: {task_obj.section_title}")
+                except Exception as e:
+                    logger.error(f"生成章节{i+1}失败: {e}")
+                    # 生成一个简单的默认章节
+                    default_content = f"# {task.get('section_title', f'章节{i+1}')}\n\n基于研究数据的分析内容。\n"
+                    sections.append(default_content)
             
             # 整合最终报告
             integrate_action = IntegrateReport()
             final_report = await integrate_action.run(
                 sections=sections,
-                report_title="绩效分析报告"  # 可以从task_plan中获取
+                report_title=title
             )
+            
+            # 保存最终报告到文件
+            if hasattr(self, '_project_repo') and self._project_repo:
+                try:
+                    await self._project_repo.docs.save(
+                        filename="final_report.md",
+                        content=final_report
+                    )
+                    logger.info(f"最终报告已保存到: {self._project_repo.docs.workdir}/final_report.md")
+                except Exception as e:
+                    logger.error(f"保存最终报告失败: {e}")
             
             return Message(
                 content=final_report,

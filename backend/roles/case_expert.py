@@ -48,24 +48,9 @@ class CaseExpertAgent(Role):
         if not search_config or not search_config.api_key:
             raise ValueError("Search config with api_key is not configured in config2.yaml")
 
-        # 从 params 字典中提取阿里云搜索所需的特定参数
-        alibaba_params = search_config.params or {}
-
-        search_engine_kwargs = {
-            "api_key": search_config.api_key,
-            "api_type": search_config.api_type,
-            "endpoint": alibaba_params.get("endpoint"),
-            "workspace": alibaba_params.get("workspace"),
-            "service_id": alibaba_params.get("service_id")
-        }
-
-        # 如果是阿里云搜索，检查必需参数是否存在
-        if search_config.api_type == "alibaba":
-            for key in ["endpoint", "workspace", "service_id"]:
-                if not search_engine_kwargs[key]:
-                    raise ValueError(f"Alibaba search requires '{key}' in search.params of config2.yaml")
-
-        self.search_engine = SearchEngine(**search_engine_kwargs)
+        # 使用 SearchEngine.from_search_config 方法正确初始化搜索引擎
+        # 这会自动处理所有配置参数，包括 params 字典中的阿里云特定参数
+        self.search_engine = SearchEngine.from_search_config(search_config)
 
         # 2. 配置长文本模型
         qwen_long_config = Config.default()

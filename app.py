@@ -15,6 +15,8 @@ from metagpt.config2 import config # 使用新的配置对象
 # 全局变量
 company = Company()
 environment = Environment()
+import shutil
+from metagpt.const import METAGPT_ROOT
 
 
 @cl.set_chat_profiles
@@ -64,21 +66,34 @@ async def start():
 async def main(message: cl.Message):
     """处理用户消息"""
     content = message.content.strip()
-    
+
     # 处理命令
     if content.startswith("/"):
         await handle_command(content)
         return
-    
+
     # 获取或创建项目ID
     project_id = cl.user_session.get("current_project_id")
-    
+
     if not project_id:
         project_id = str(uuid.uuid4())
         cl.user_session.set("current_project_id", project_id)
-    
+
+    # 处理文件上传
+    file_paths = []
+    if message.elements:
+        uploads_path = METAGPT_ROOT / project_id / "uploads"
+        uploads_path.mkdir(parents=True, exist_ok=True)
+
+        for file_element in message.elements:
+            src_path = file_element.path
+            dest_path = uploads_path / file_element.name
+            shutil.copy(src_path, dest_path)
+            file_paths.append(str(dest_path))
+            await cl.Message(content=f"✅ 文件 `{file_element.name}` 已上传至项目 `{project_id}`").send()
+
     # 在项目上下文中处理对话
-    await handle_project_conversation(project_id, content)
+    await handle_project_conversation(project_id, content, file_paths)
 
 
 async def handle_command(command: str):
@@ -93,14 +108,14 @@ async def handle_command(command: str):
         await cl.Message(content="❌ 未知命令，使用 `/help` 查看可用命令").send()
 
 
-async def handle_project_conversation(project_id: str, message: str):
+async def handle_project_conversation(project_id: str, message: str, file_paths: List[str] = None):
     """在项目上下文中处理对话"""
     try:
         # 使用公司服务处理消息
-        response = await company.process_message(project_id, message, environment)
-        
+        response = await company.process_message(project_id, message, environment, file_paths)
+
         await cl.Message(content=response).send()
-        
+
     except Exception as e:
         logger.error(f"处理消息失败: {e}")
         await cl.Message(content=f"❌ 处理消息失败: {str(e)}").send()

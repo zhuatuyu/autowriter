@@ -1,124 +1,78 @@
+#!/usr/bin/env python
 """
-✍️ 写作专家（张翰） - 完全符合MetaGPT原生架构的写作智能体
+写作专家角色 - 内容生成和整合
 """
-from metagpt.roles.role import Role
+from metagpt.roles import Role
 from metagpt.schema import Message
 from metagpt.logs import logger
-from pydantic import BaseModel, Field
-from backend.actions.writer_action import WriteContent, SummarizeText, PolishContent, ReviewContent
+
+from backend.actions.writer_action import WriteSection, IntegrateReport
+from backend.actions.pm_action import TaskPlan, Task
+from backend.actions.research_action import ResearchData
+from backend.actions.architect_action import MetricAnalysisTable
 
 
-class WritingReport(BaseModel):
-    """用于在写作流程中传递结构化数据的模型"""
-    topic: str
-    source_content: str = ""
-    summary: str = ""
-    content: str = ""
-    polished_content: str = ""
-
-
-class WriterExpertAgent(Role):
+class WriterExpert(Role):
     """
-    ✍️ 写作专家（张翰） - 完全符合MetaGPT原生架构的写作智能体
-    负责根据案例研究结果撰写高质量的结构化报告
+    写作专家 - 专注的内容创作者
     """
-    
-    name: str = "张翰"
-    profile: str = "writer_expert"
-    goal: str = "根据案例研究结果撰写高质量的结构化报告"
-    constraints: str = "确保报告内容准确、结构清晰、语言专业"
-    language: str = "zh-cn"
+    name: str = "写作专家"
+    profile: str = "Writer Expert"
+    goal: str = "基于任务计划和研究数据生成高质量的报告内容"
+    constraints: str = "必须充分利用RAG检索和指标数据，确保内容的准确性和专业性"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # 设置actions
-        actions = [WriteContent(), SummarizeText(), PolishContent(), ReviewContent()]
-        self.set_actions(actions)
-        
-        # 监听案例专家和数据分析师的结果
-        self._watch(["CaseExpertAgent", "DataAnalystAgent"])
-
-    async def _think(self) -> bool:
-        """思考阶段：分析当前任务"""
-        msg = self.rc.memory.get(k=1)[0]
-        
-        # 检查是否是写作任务
-        if "写作" in msg.content or "撰写" in msg.content or "报告" in msg.content:
-            logger.info(f"{self.name} 识别到写作任务")
-            return True
-            
-        return False
+        self.set_actions([WriteSection, IntegrateReport])
+        self._watch([TaskPlan, ResearchData, MetricAnalysisTable])
 
     async def _act(self) -> Message:
-        """执行阶段：执行写作任务"""
-        msg = self.rc.memory.get(k=1)[0]
+        """
+        执行WriterExpert的核心逻辑
+        """
+        # 检查是否有所有必需的数据
+        task_plan_msgs = self.rc.memory.get_by_action(TaskPlan)
+        research_data_msgs = self.rc.memory.get_by_action(ResearchData)
+        metric_table_msgs = self.rc.memory.get_by_action(MetricAnalysisTable)
         
-        # 获取项目仓库
-        project_repo = getattr(self, 'project_repo', None)
-        if not project_repo:
-            logger.error("ProjectRepo not found in agent context!")
-            return Message(content="写作失败：缺少项目仓库", role=self.profile)
+        if not all([task_plan_msgs, research_data_msgs, metric_table_msgs]):
+            logger.warning("等待所有必需数据...")
+            return Message(content="等待数据中...", cause_by=WriteSection)
         
         try:
-            # 获取案例研究结果
-            case_reports_path = project_repo.get_path('research/cases')
-            if case_reports_path.exists():
-                case_files = list(case_reports_path.glob("*.md"))
-                if case_files:
-                    # 读取最新的案例报告
-                    latest_case = max(case_files, key=lambda x: x.stat().st_mtime)
-                    with open(latest_case, 'r', encoding='utf-8') as f:
-                        case_content = f.read()
-                else:
-                    case_content = "暂无案例研究结果"
-            else:
-                case_content = "暂无案例研究结果"
+            # 解析所有数据
+            task_plan = TaskPlan.model_validate_json(task_plan_msgs[-1].content)
+            research_data = ResearchData.model_validate_json(research_data_msgs[-1].content)
+            metric_table = MetricAnalysisTable.model_validate_json(metric_table_msgs[-1].content)
             
-            # 获取数据分析结果
-            analysis_path = project_repo.get_path('analysis')
-            if analysis_path.exists():
-                analysis_files = list(analysis_path.glob("*.md"))
-                if analysis_files:
-                    # 读取最新的分析报告
-                    latest_analysis = max(analysis_files, key=lambda x: x.stat().st_mtime)
-                    with open(latest_analysis, 'r', encoding='utf-8') as f:
-                        analysis_content = f.read()
-                else:
-                    analysis_content = "暂无数据分析结果"
-            else:
-                analysis_content = "暂无数据分析结果"
+            logger.info(f"开始写作报告，共 {len(task_plan.tasks)} 个章节")
             
-            # 合并内容
-            source_content = f"## 案例研究结果\n\n{case_content}\n\n## 数据分析结果\n\n{analysis_content}"
+            # 为每个任务生成章节内容
+            sections = []
+            write_action = WriteSection()
             
-            # 执行写作任务
-            write_action = WriteContent()
-            content = await write_action.run(
-                topic="绩效评价报告",
-                summary=source_content,
-                project_repo=project_repo
-            )
+            for task in task_plan.tasks:
+                section_content = await write_action.run(
+                    task=task,
+                    vector_store_path=research_data.vector_store_path,
+                    metric_table_json=metric_table.data_json
+                )
+                sections.append(section_content)
+                logger.info(f"完成章节: {task.section_title}")
             
-            # 润色内容
-            polish_action = PolishContent()
-            polished_content = await polish_action.run(
-                content=content,
-                project_repo=project_repo
-            )
-            
-            # 审核内容
-            review_action = ReviewContent()
-            final_content = await review_action.run(
-                content=polished_content,
-                project_repo=project_repo
+            # 整合最终报告
+            integrate_action = IntegrateReport()
+            final_report = await integrate_action.run(
+                sections=sections,
+                report_title="绩效分析报告"  # 可以从task_plan中获取
             )
             
             return Message(
-                content=f"报告撰写完成，最终报告已保存",
-                role=self.profile
+                content=final_report,
+                cause_by=IntegrateReport
             )
             
         except Exception as e:
-            logger.error(f"写作失败: {e}")
-            return Message(content=f"写作失败: {str(e)}", role=self.profile)
+            logger.error(f"写作报告失败: {e}")
+            return Message(content=f"错误：{str(e)}", cause_by=WriteSection)

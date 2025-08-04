@@ -1,41 +1,68 @@
+#!/usr/bin/env python
 """
-ProjectManager智能体 - 项目管理器
-完全模仿MetaGPT的project_manager.py实现，继承RoleZero
-使用MetaGPT原生的WriteTasks Action来处理任务分配
+项目经理角色 - 任务规划和调度
 """
-from metagpt.actions import WriteTasks
-from metagpt.actions.design_api import WriteDesign
-from metagpt.roles.di.role_zero import RoleZero
+from metagpt.roles import Role
+from metagpt.schema import Message
+from metagpt.logs import logger
+
+from backend.actions.pm_action import CreateTaskPlan, TaskPlan
+from backend.actions.architect_action import ReportStructure, DesignReportStructure
 
 
-class ProjectManagerAgent(RoleZero):
+class ProjectManager(Role):
     """
-    ProjectManager智能体 - 项目管理器
-    完全模仿MetaGPT的project_manager.py实现，继承RoleZero
-    使用MetaGPT原生的WriteTasks Action来处理任务分配
+    项目经理 - 纯粹的任务调度者 (SOP第三阶段)
     """
-    name: str = "吴丽"
-    profile: str = "Project_Manager"
-    goal: str = "制定项目计划并协调团队执行"
-    constraints: str = "确保计划的可行性和团队协作的高效性"
-    
-    # RoleZero特有配置 - 完全按照MetaGPT标准设置
-    instruction: str = """Use WriteTasks tool to write a project task list"""
-    max_react_loop: int = 1  # 按照MetaGPT原生设置
-    tools: list[str] = ["Editor:write,read,similarity_search", "RoleZero", "WriteTasks"]
+    name: str = "项目经理"
+    profile: str = "Project Manager"
+    goal: str = "将报告结构分解为具体的写作任务"
+    constraints: str = "必须确保任务分解合理，便于WriterExpert执行"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # NOTE: The following init setting will only be effective when self.use_fixed_sop is changed to True
-        self.enable_memory = False
-        self.set_actions([WriteTasks])
-        self._watch([WriteDesign])
+        
+        # 设置要执行的Action
+        self.set_actions([CreateTaskPlan])
+        
+        # 监听Architect的报告结构
+        self._watch([DesignReportStructure])
 
-    def _update_tool_execution(self):
-        wt = WriteTasks()
-        self.tool_execution_map.update(
-            {
-                "WriteTasks.run": wt.run,
-                "WriteTasks": wt.run,  # alias
-            }
-        )
+    async def _act(self) -> Message:
+        """
+        执行ProjectManager的核心逻辑 - SOP第三阶段
+        """
+        todo = self.rc.todo
+        
+        if isinstance(todo, CreateTaskPlan):
+            # 从记忆中获取报告结构
+            structure_msgs = self.rc.memory.get_by_action(DesignReportStructure)
+            
+            if not structure_msgs:
+                logger.error("未找到报告结构数据")
+                return Message(content="未找到报告结构数据", role=self.profile)
+            
+            # 获取最新的报告结构
+            structure_msg = structure_msgs[-1]
+            if not hasattr(structure_msg, 'instruct_content') or not isinstance(structure_msg.instruct_content, ReportStructure):
+                logger.error("报告结构数据格式不正确")
+                return Message(content="报告结构数据格式不正确", role=self.profile)
+            
+            report_structure = structure_msg.instruct_content
+            logger.info(f"ProjectManager开始创建任务计划，基于结构: {report_structure.title}")
+            
+            # 执行任务计划创建
+            task_plan = await todo.run(report_structure)
+            
+            # 创建包含TaskPlan的消息，供WriterExpert使用
+            msg = Message(
+                content=f"任务计划创建完成，共{len(task_plan.tasks)}个任务",
+                role=self.profile,
+                cause_by=type(todo),
+                instruct_content=task_plan
+            )
+            
+            logger.info(f"ProjectManager完成任务规划，任务数量: {len(task_plan.tasks)}")
+            return msg
+        
+        return Message(content="ProjectManager: 无待办任务", role=self.profile)

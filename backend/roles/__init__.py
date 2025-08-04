@@ -2,14 +2,18 @@
 Contains all the specialized agent implementations
 """
 
-from .project_manager import ProjectManagerAgent
+from .project_manager import ProjectManager
 from .case_expert import CaseExpertAgent
-from .writer_expert import WriterExpertAgent
+from .writer_expert import WriterExpert
 from .data_analyst import DataAnalystAgent
+from .architect import Architect
+from .product_manager import ProductManager
 
 __all__ = [
-    'ProjectManagerAgent',
+    'ProjectManager',
+    'ProductManager', 
+    'Architect',
+    'WriterExpert',
     'CaseExpertAgent',
-    'WriterExpertAgent',
     'DataAnalystAgent'
 ]

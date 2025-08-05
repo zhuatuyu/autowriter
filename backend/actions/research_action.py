@@ -19,6 +19,8 @@ from metagpt.tools.web_browser_engine import WebBrowserEngine
 from metagpt.utils.project_repo import ProjectRepo
 from metagpt.utils.common import OutputParser
 
+# MetaGPT 原生 RAG 组件 - 强制使用，不再提供简化版本
+
 
 # --- 整合case_research.py中的精细化提示词 ---
 COMPREHENSIVE_RESEARCH_BASE_SYSTEM = """你是一名专业的AI研究分析师和产品经理。你的目标是：
@@ -111,6 +113,7 @@ class ResearchData(BaseModel):
     """研究成果的结构化数据模型"""
     brief: str = Field(..., description="基于研究生成的综合性简报")
     vector_store_path: str = Field(..., description="存储研究内容向量索引的路径")
+    content_chunks: List[str] = Field(default_factory=list, description="分块的内容列表，供RAG检索使用")
 
 
 class PrepareDocuments(Action):
@@ -204,30 +207,53 @@ class ConductComprehensiveResearch(Action):
         project_repo: ProjectRepo = None,
         local_docs: Documents = None
     ) -> ResearchData:
-        """执行全面的研究，整合网络搜索和本地文档"""
-        logger.info(f"开始对主题 '{topic}' 进行全面研究...")
+        """执行全面的研究，整合网络搜索和本地文档，构建向量知识库"""
+        logger.info(f"开始对主题 '{topic}' 进行全面研究，包括向量化处理...")
 
-        # 1. 网络研究
-        online_research_content = await self._conduct_online_research(topic, decomposition_nums, url_per_query)
+        # 1. 【优先】构建基础向量知识库（如果提供本地文档）
+        base_engine = None
+        if local_docs and local_docs.docs:
+            logger.info("检测到本地文档，优先构建基础向量知识库...")
+            vector_store_path, content_chunks, base_engine = await self._build_vector_knowledge_base_native(
+                topic, "", local_docs, "", project_repo
+            )
+            logger.info(f"✅ 基础向量库构建成功: {vector_store_path}")
+            logger.info("✅ 向量检索引擎已准备就绪。")
+        
+        # 2. 网络研究 (整合RAG检索)
+        online_research_content = await self._conduct_online_research(
+            topic, 
+            decomposition_nums, 
+            url_per_query,
+            rag_engine=base_engine  # 传入RAG引擎
+        )
 
-        # 2. 本地文档分析 (如果提供)
-        local_docs_content = ""
+        # 3. 整合内容并生成研究简报 (暂时保持不变，后续优化)
+        combined_content = online_research_content
         if local_docs and local_docs.docs:
             local_docs_content = "\n\n--- 本地知识库 ---\n"
             for doc in local_docs.docs:
                 local_docs_content += f"### 文档: {doc.filename}\n{doc.content}\n\n"
+            combined_content += local_docs_content
 
-        # 3. 整合内容并生成研究简报
-        combined_content = online_research_content + local_docs_content
         prompt = GENERATE_RESEARCH_BRIEF_PROMPT.format(content=combined_content, topic=topic)
         brief = await self._aask(prompt, [COMPREHENSIVE_RESEARCH_BASE_SYSTEM])
         
-        logger.info(f"研究简报生成完毕")
+        logger.info(f"研究简报生成完毕。")
 
-        # 4. 创建并返回ResearchData
-        # 注意：这里的vector_store_path只是一个示例，实际应用中需要实现向量化逻辑
-        vector_store_path = f"workspace/research_data/{topic.replace(' ', '_')}.faiss"
-        research_data = ResearchData(brief=brief, vector_store_path=vector_store_path)
+        # 4. 【更新】向量知识库 (将网络内容加入) - 强制使用原生RAG
+        final_vector_store_path, final_content_chunks, final_engine = await self._build_vector_knowledge_base_native(
+            topic, online_research_content, local_docs, combined_content, project_repo
+        )
+        logger.info(f"🔥 最终向量库已更新: {final_vector_store_path}")
+
+
+        # 5. 创建并返回ResearchData
+        research_data = ResearchData(
+            brief=brief, 
+            vector_store_path=final_vector_store_path,
+            content_chunks=final_content_chunks
+        )
 
         if project_repo:
             # 使用docs仓库来保存研究简报
@@ -240,9 +266,149 @@ class ConductComprehensiveResearch(Action):
             logger.info(f"研究简报已保存到: {brief_path}")
 
         return research_data
+    async def _build_vector_knowledge_base_native(
+        self,
+        topic: str,
+        online_content: str,
+        local_docs: List[Document],
+        combined_content: str,
+        project_repo: ProjectRepo = None
+    ) -> Tuple[str, List[str], "SimpleEngine"]:
+        """
+        使用MetaGPT原生RAG引擎构建向量知识库
+        
+        Returns:
+            Tuple[str, List[str], SimpleEngine]: (vector_store_path, content_chunks, engine)
+        """
+        try:
+            from metagpt.rag.engines.simple import SimpleEngine
+            from metagpt.rag.schema import FAISSRetrieverConfig, VectorIndexConfig
+            import tempfile
+            import os
+            
+            # 创建临时存储目录
+            if project_repo:
+                base_dir = os.path.join(project_repo.workdir, "vector_storage")
+            else:
+                base_dir = tempfile.mkdtemp(prefix="rag_storage_")
+            
+            # 安全的目录名称
+            safe_topic = "".join(c for c in topic if c.isalnum() or c in "()[]{},.!?;:@#$%^&*+=_-")[:100]
+            vector_store_path = os.path.join(base_dir, safe_topic)
+            os.makedirs(vector_store_path, exist_ok=True)
+            
+            # 准备文档内容
+            all_content = []
+            
+            # 添加在线研究内容
+            if online_content and online_content.strip():
+                all_content.append(("在线研究内容", online_content))
+            
+            # 添加本地文档内容
+            if local_docs:  # 检查local_docs不为None
+                for doc in local_docs.docs:  # 正确访问docs属性
+                    if doc.content and doc.content.strip():
+                        all_content.append((f"本地文档: {doc.filename}", doc.content))
+            
+            if not all_content:
+                logger.warning("没有可用内容构建向量知识库")
+                return vector_store_path, [], None
+            
+            # 将内容转换为临时文件
+            temp_files = []
+            content_chunks = []
+            
+            for title, content in all_content:
+                # 将内容分块
+                chunks = self._split_content_to_chunks(content)
+                content_chunks.extend(chunks)
+                
+                # 创建临时文件
+                temp_file = os.path.join(vector_store_path, f"{len(temp_files)}.txt")
+                with open(temp_file, 'w', encoding='utf-8') as f:
+                    f.write(f"# {title}\n\n{content}")
+                temp_files.append(temp_file)
+            
+            # 使用MetaGPT原生的RAG embedding工厂 - 这是正确的方式！
+            from llama_index.llms.openai import OpenAI as LlamaOpenAI
+            from pathlib import Path
+            from metagpt.config2 import Config
+            from metagpt.rag.factories.embedding import get_rag_embedding
+            
+            # 手动加载完整配置，确保embedding配置被正确读取
+            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
+            
+            # 获取LLM配置 - 使用兼容的模型名
+            llm_config = full_config.llm
+            llm = LlamaOpenAI(
+                api_key=llm_config.api_key,
+                base_url=llm_config.base_url,
+                model="gpt-3.5-turbo"  # 使用llama_index认识的模型名，实际会调用阿里云API
+            )
+            
+            # 使用MetaGPT原生embedding工厂 - 这会正确处理model_name参数
+            embed_model = get_rag_embedding(config=full_config)
+            # 阿里云DashScope embedding API限制批处理大小不能超过10
+            embed_model.embed_batch_size = 10
+            
+            engine = SimpleEngine.from_docs(
+                input_files=temp_files,  # 提供文件列表
+                llm=llm,  # 真实的LLM配置
+                embed_model=embed_model  # 真实的嵌入模型
+            )
+            
+            logger.info(f"✅ 向量知识库已构建，共 {len(content_chunks)} 个内容块")
+            logger.info(f"📁 向量库存储路径: {vector_store_path}")
+            
+            return vector_store_path, content_chunks, engine
+            
+        except Exception as e:
+            logger.error(f"原生RAG引擎构建失败: {e}")
+            # 不再降级，让错误暴露出来
+            raise e
+    
 
-    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int) -> str:
+    
+    def _split_content_to_chunks(self, content: str, max_chunk_size: int = 1000) -> List[str]:
+        """将内容分割成块"""
+        # 简单的分块策略：按段落和长度分割
+        paragraphs = content.split('\n\n')
+        chunks = []
+        current_chunk = ""
+        
+        for paragraph in paragraphs:
+            # 如果当前块加上新段落会超出限制，保存当前块
+            if len(current_chunk) + len(paragraph) > max_chunk_size and current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = paragraph
+            else:
+                current_chunk += ("\n\n" if current_chunk else "") + paragraph
+        
+        # 添加最后一个块
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, rag_engine=None) -> str:
         """执行在线研究"""
+        if not self.search_engine:
+            logger.warning("搜索引擎未初始化，将返回模拟研究内容")
+            return f"""### 模拟研究内容
+            
+主题: {topic}
+
+这是一个模拟的在线研究结果。由于搜索引擎未配置，我们提供以下模拟内容：
+
+1. **背景信息**: 该项目属于农业领域的绩效评价项目
+2. **行业趋势**: 当前农业项目越来越注重科学化管理和绩效评估
+3. **最佳实践**: 综合性评价体系应包括经济效益、社会效益和环境效益
+4. **技术方案**: 使用数据分析和专业评估方法
+5. **关键指标**: 成本控制、项目完成度、用户满意度等
+
+这是一个测试用的模拟研究内容，实际部署时应配置有效的搜索引擎。
+"""
+        
         logger.info("步骤 1: 生成搜索关键词")
         keywords_prompt = RESEARCH_TOPIC_SYSTEM.format(topic=topic)
         keywords_str = await self._aask(SEARCH_KEYWORDS_PROMPT, [keywords_prompt])
@@ -267,12 +433,23 @@ class ConductComprehensiveResearch(Action):
                 logger.error(f"搜索关键词失败 {kw}: {e}")
                 search_results.append([])  # 添加空结果保持索引一致
         
+        # RAG增强：使用关键词查询本地向量库
+        rag_results_str = ""
+        if rag_engine:
+            logger.info("...同时查询本地向量知识库...")
+            rag_results = await rag_engine.aretrieve(query=" ".join(keywords))
+            if rag_results:
+                rag_results_str = "\n\n### 本地知识库相关信息\n" + "\n".join([r.text for r in rag_results])
+        
         search_results_str = "\n".join([f"#### 关键词: {kw}\n{res}\n" for kw, res in zip(keywords, search_results)])
+        
+        # 将RAG结果和网络搜索结果合并
+        combined_search_results = search_results_str + rag_results_str
 
         logger.info("步骤 2: 分解研究问题")
         decompose_prompt = DECOMPOSE_RESEARCH_PROMPT.format(
             decomposition_nums=decomposition_nums, 
-            search_results=search_results_str
+            search_results=combined_search_results
         )
         queries_str = await self._aask(decompose_prompt, [keywords_prompt])
         try:

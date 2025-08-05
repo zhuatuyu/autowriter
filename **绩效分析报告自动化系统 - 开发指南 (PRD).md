@@ -1,7 +1,5 @@
 
-没问题，很高兴我们的讨论能达成共识。基于您的要求和我们最终确定的SOP方案，我为您准备了一份详尽的开发指南（PRD）。这份文档将作为您后续开发工作的核心蓝图，它清晰地定义了工作流程、智能体职责、关键技术实现，并提供了可以直接参考的代码范例。
 
----
 
 ## **绩效分析报告自动化系统 - 开发指南 (PRD)**
 
@@ -21,7 +19,7 @@ sequenceDiagram
     participant ProjectManager
     participant WriterExpert
 
-    User->>ProductManager: 输入报告目标 (e.g., "分析A公司的年度营销绩效")
+    User->>ProductManager: 输入报告目标 (e.g., "撰写 《祥符区2024年小麦“一喷三防”项目财政重点绩效评价报告》并设计完整的指标评价体系")
     
     Note over ProductManager: 阶段一: 需求分析与研究
     ProductManager->>ProductManager: Action: ConductResearch

@@ -40,84 +40,66 @@ class ProductManager(Role):
         research_action = ConductComprehensiveResearch(search_engine=self.search_engine)
         prepare_docs_action = PrepareDocuments()
         
-        # 设置要执行的Action
+        # 设置要执行的Action - 使用实例而不是类
         self.set_actions([prepare_docs_action, research_action])
         
-        # 监听用户需求和PrepareDocuments - 这是SOP的起点
-        self._watch([UserRequirement, PrepareDocuments])
+        # 只监听UserRequirement，这是SOP的唯一起点
+        self._watch([UserRequirement])
+        
+        # 注意：现在在单次_act调用中完成两个阶段
 
     async def _act(self) -> Message:
         """
         执行ProductManager的核心逻辑 - SOP第一阶段
+        在一次调用中完成两个阶段：文档准备 + 综合研究
         """
-        todo = self.rc.todo
         
-        # 从记忆中获取用户需求
-        user_msgs = self.rc.memory.get_by_action(UserRequirement)
+        # 阶段1: 准备文档
+        logger.info("SOP 1.1: 开始准备和向量化文档...")
+        prepare_action = self.actions[0]  # PrepareDocuments实例
         
-        if not user_msgs:
-            logger.error("未找到用户需求消息")
-            return Message(content="未找到用户需求", role=self.profile)
+        uploads_path = Path(self._project_repo.workdir) / "uploads"
+        if not uploads_path.exists():
+            logger.warning(f"上传目录不存在: {uploads_path}，跳过文档准备。")
+            documents = Documents(docs=[])
+        else:
+            documents = await prepare_action.run(uploads_path)
+
+        logger.info(f"✅ 文档准备完成，处理了 {len(documents.docs)} 个文档。")
         
-        # 获取最新的用户需求
-        latest_user_msg = user_msgs[-1]
-        user_requirement = latest_user_msg.content
-        logger.info(f"ProductManager开始处理需求: {user_requirement}")
+        # 阶段2: 立即进行综合研究
+        logger.info("SOP 1.2: 开始进行综合研究...")
+        research_action = self.actions[1]  # ConductComprehensiveResearch实例
+
+        # 获取用户最初的需求作为研究主题
+        user_req_msgs = self.rc.memory.get_by_action(UserRequirement)
+        if user_req_msgs:
+            latest_msg = user_req_msgs[-1]
+            # 正确解析Message内容
+            topic = latest_msg.content if isinstance(latest_msg.content, str) else str(latest_msg.content)
+        else:
+            topic = "未定义的研究主题"
         
-        # 检查是否有上传的文档
-        local_docs = None
-        if hasattr(latest_user_msg, 'instruct_content') and latest_user_msg.instruct_content:
-            # 正确解析instruct_content
-            try:
-                if hasattr(latest_user_msg.instruct_content, 'get'):
-                    # 如果是字典形式的instruct_content
-                    instruct_data = latest_user_msg.instruct_content
-                    if 'docs' in instruct_data:
-                        docs_data = instruct_data['docs']
-                        from backend.actions.research_action import Document
-                        docs = [Document(**doc_data) for doc_data in docs_data]
-                        local_docs = Documents(docs=docs)
-                elif isinstance(latest_user_msg.instruct_content, Documents):
-                    local_docs = latest_user_msg.instruct_content
-                
-                if local_docs:
-                    logger.info(f"发现上传的文档: {len(local_docs.docs)} 个")
-            except Exception as e:
-                logger.error(f"解析上传文档失败: {e}")
+        logger.info(f"研究主题: {topic}")
+        if documents and documents.docs:
+            logger.info(f"将使用 {len(documents.docs)} 个本地文档进行RAG增强研究。")
+
+        # 执行研究，现在local_docs是正确传递的
+        research_data = await research_action.run(
+            topic=topic,
+            project_repo=self._project_repo,
+            local_docs=documents
+        )
         
-        if isinstance(todo, ConductComprehensiveResearch):
-            # 执行综合研究，包含本地文档
-            research_data = await todo.run(
-                topic=user_requirement,
-                project_repo=self._project_repo,
-                local_docs=local_docs  # 传递本地文档
-            )
-            
-            # 创建包含ResearchData的消息，供下游Architect使用
-            msg = Message(
-                content=f"研究完成: {research_data.brief[:200]}...",
-                role=self.profile,
-                cause_by=type(todo),
-                instruct_content=Message.create_instruct_value(research_data.model_dump())
-            )
-            
-            logger.info(f"ProductManager完成研究，向量索引路径: {research_data.vector_store_path}")
-            return msg
+        # 创建最终的研究简报消息
+        msg = Message(
+            content=f"研究完成: {research_data.brief[:200]}...",
+            role=self.profile,
+            cause_by=type(research_action),
+            instruct_content=research_data
+        )
         
-        elif isinstance(todo, PrepareDocuments):
-            # 如果是PrepareDocuments任务，处理上传的文档
-            if self._project_repo:
-                uploads_path = Path(self._project_repo.workdir) / "uploads"
-                documents = await todo.run(uploads_path)
-                
-                msg = Message(
-                    content=f"文档准备完成，共处理 {len(documents.docs)} 个文档",
-                    role=self.profile,
-                    cause_by=type(todo),
-                    instruct_content=Message.create_instruct_value(documents.model_dump())
-                )
-                
-                logger.info(f"PrepareDocuments完成，处理了 {len(documents.docs)} 个文档")
-                return msg
-        
-        return Message(content="ProductManager: 无待办任务", role=self.profile)
+        logger.info(f"✅ ProductManager完成所有研究工作。")
+        logger.info(f"📄 研究简报长度: {len(research_data.brief)} 字符")
+        logger.info(f"📁 向量存储路径: {research_data.vector_store_path}")
+        return msg

@@ -175,7 +175,8 @@ class WriterExpert(Role):
                 except Exception as e:
                     logger.error(f"生成章节{i+1}失败: {e}")
                     # 生成一个简单的默认章节
-                    default_content = f"# {task.get('section_title', f'章节{i+1}')}\n\n基于研究数据的分析内容。\n"
+                    section_title = task_obj.section_title if hasattr(task_obj, 'section_title') else f'章节{i+1}'
+                    default_content = f"# {section_title}\n\n基于研究数据的分析内容。\n"
                     sections.append(default_content)
             
             # 整合最终报告

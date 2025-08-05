@@ -9,6 +9,8 @@ from metagpt.logs import logger
 
 from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
 from backend.actions.architect_action import DesignReportStructure as ArchitectAction, ArchitectOutput
+from typing import List, Optional
+import re
 
 class Architect(Role):
     """
@@ -26,6 +28,61 @@ class Architect(Role):
         # 设置Action和监听 - 专注于消费ProductManager的研究成果
         self.set_actions([ArchitectAction])
         self._watch([ConductComprehensiveResearch])  # 监听ProductManager的输出
+        
+        # 用于存储向量知识库的引用
+        self._current_research_data: Optional[ResearchData] = None
+
+    def _semantic_search(self, query: str, research_data: ResearchData, top_k: int = 3) -> List[str]:
+        """
+        基于语义的向量检索（目前使用关键词匹配，后续可升级为真正的向量相似度检索）
+        """
+        if not research_data.content_chunks:
+            logger.warning("向量知识库为空，无法进行检索")
+            return []
+        
+        # 提取查询关键词
+        query_keywords = self._extract_keywords(query)
+        logger.info(f"🔍 检索关键词: {query_keywords}")
+        
+        # 计算每个内容块的相关度分数
+        chunk_scores = []
+        for i, chunk in enumerate(research_data.content_chunks):
+            score = self._calculate_relevance_score(chunk, query_keywords)
+            chunk_scores.append((i, score, chunk))
+        
+        # 按分数降序排序，取前top_k个
+        chunk_scores.sort(key=lambda x: x[1], reverse=True)
+        relevant_chunks = []
+        
+        for i, (chunk_idx, score, chunk) in enumerate(chunk_scores[:top_k]):
+            if score > 0:  # 只返回有相关性的块
+                relevant_chunks.append(chunk)
+                logger.info(f"📋 相关块 {i+1} (分数: {score}): {chunk[:100]}...")
+        
+        return relevant_chunks
+    
+    def _extract_keywords(self, query: str) -> List[str]:
+        """提取查询中的关键词"""
+        # 简单的关键词提取，去掉常见停用词
+        stopwords = {'的', '了', '在', '是', '和', '与', '或', '以及', '对于', '关于', '如何', '什么', '哪些'}
+        words = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+', query)
+        keywords = [word for word in words if len(word) > 1 and word not in stopwords]
+        return keywords
+    
+    def _calculate_relevance_score(self, chunk: str, keywords: List[str]) -> float:
+        """计算内容块与关键词的相关度分数"""
+        score = 0
+        chunk_lower = chunk.lower()
+        
+        for keyword in keywords:
+            keyword_lower = keyword.lower()
+            # 精确匹配得分更高
+            if keyword_lower in chunk_lower:
+                count = chunk_lower.count(keyword_lower)
+                score += count * 2  # 出现次数越多分数越高
+        
+        # 标准化分数
+        return score / max(len(chunk), 1)
 
     async def _act(self) -> Message:
         """执行架构设计任务"""
@@ -38,7 +95,7 @@ class Architect(Role):
             logger.info(f"  消息 {i}: cause_by={msg.cause_by}, role={msg.role}")
         
         
-        # 获取ProductManager的研究数据 - 修复bug: 从instruct_content获取而不是content
+        # 获取ProductManager的研究数据 - 完整获取包括向量知识库
         research_data_obj = None
         research_brief = ""
         
@@ -49,14 +106,24 @@ class Architect(Role):
                 # 正确解析instruct_content中的ResearchData对象
                 if hasattr(msg, 'instruct_content') and msg.instruct_content:
                     try:
-                        # 处理instruct_content (可能是ResearchData对象或动态生成的对象)
-                        if hasattr(msg.instruct_content, 'brief'):
-                            research_brief = msg.instruct_content.brief
-                        elif isinstance(msg.instruct_content, dict) and 'brief' in msg.instruct_content:
-                            research_brief = msg.instruct_content['brief']
-                        elif isinstance(msg.instruct_content, ResearchData):
+                        # 优先处理ResearchData对象
+                        if isinstance(msg.instruct_content, ResearchData):
                             research_data_obj = msg.instruct_content
                             research_brief = research_data_obj.brief
+                            self._current_research_data = research_data_obj
+                            logger.info(f"📊 获取到完整ResearchData，包含 {len(research_data_obj.content_chunks)} 个向量块")
+                        elif hasattr(msg.instruct_content, 'brief'):
+                            research_brief = msg.instruct_content.brief
+                            # 尝试构造ResearchData对象
+                            if hasattr(msg.instruct_content, 'content_chunks'):
+                                research_data_obj = msg.instruct_content
+                                self._current_research_data = research_data_obj
+                        elif isinstance(msg.instruct_content, dict):
+                            research_brief = msg.instruct_content.get('brief', '')
+                            # 尝试从字典构造ResearchData
+                            if 'content_chunks' in msg.instruct_content:
+                                research_data_obj = ResearchData(**msg.instruct_content)
+                                self._current_research_data = research_data_obj
                         else:
                             # 如果instruct_content不是预期格式，尝试从content获取
                             research_brief = msg.content
@@ -69,13 +136,43 @@ class Architect(Role):
             research_brief = "No research data available"
             logger.warning("未找到有效的研究数据，使用默认值")
         
-        logger.info(f"成功获取研究简报，长度: {len(research_brief)} 字符")
+        logger.info(f"📄 成功获取研究简报，长度: {len(research_brief)} 字符")
+        if self._current_research_data:
+            logger.info(f"🧠 向量知识库可用，包含 {len(self._current_research_data.content_chunks)} 个内容块")
         
-        # 执行报告结构设计
+        # 执行报告结构设计 - 利用向量检索增强设计
         todo = self.rc.todo
         if isinstance(todo, ArchitectAction):
+            # 【新增】如果有向量知识库，进行RAG增强设计
+            enhanced_research_context = research_brief
+            
+            if self._current_research_data and self._current_research_data.content_chunks:
+                logger.info("🔍 启动RAG增强的报告结构设计...")
+                
+                # 针对报告结构设计进行多角度检索
+                design_queries = [
+                    "报告结构 章节划分 目录大纲",
+                    "关键指标 评价指标 绩效指标",
+                    "数据分析 技术方案 实施方法",
+                    "风险挑战 问题建议 解决方案"
+                ]
+                
+                rag_context = "\n\n### RAG检索增强内容\n\n"
+                
+                for i, query in enumerate(design_queries, 1):
+                    relevant_chunks = self._semantic_search(query, self._current_research_data, top_k=2)
+                    if relevant_chunks:
+                        rag_context += f"#### 检索维度 {i}: {query}\n"
+                        for j, chunk in enumerate(relevant_chunks, 1):
+                            rag_context += f"**相关内容 {j}:**\n{chunk}\n\n"
+                
+                # 将RAG检索结果与原始研究简报结合
+                enhanced_research_context = research_brief + rag_context
+                logger.info(f"✅ RAG增强完成，增强后内容长度: {len(enhanced_research_context)} 字符")
+            
             # DesignReportStructure返回Tuple[ReportStructure, MetricAnalysisTable]
-            report_structure, metric_table = await todo.run(research_brief)
+            # 传递research_data参数到新的Action
+            report_structure, metric_table = await todo.run(enhanced_research_context, research_data=self._current_research_data)
             
             # 保存ReportStructure到文件
             if hasattr(self, '_project_repo') and self._project_repo:
@@ -115,8 +212,14 @@ class Architect(Role):
                 metric_analysis_table=metric_table
             )
             
+            # 输出更详细的完成信息
+            content_msg = f"📋 报告结构设计完成：{report_structure.title}，共{len(report_structure.sections)}个章节"
+            if self._current_research_data:
+                content_msg += f"；✨ 使用RAG增强设计（基于{len(self._current_research_data.content_chunks)}个向量块）"
+            content_msg += "；📊 指标分析表生成完成"
+            
             msg = Message(
-                content=f"报告结构设计完成：{report_structure.title}，共{len(report_structure.sections)}个章节；指标分析表生成完成",
+                content=content_msg,
                 role=self.profile,
                 cause_by=type(todo),
                 sent_from=self,

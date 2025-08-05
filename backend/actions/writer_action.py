@@ -29,7 +29,21 @@ class WriteSection(Action):
         logger.info(f"开始写作章节: {task.section_title}")
         
         # 1. 加载指标数据
-        metric_df = pd.read_json(metric_table_json)
+        try:
+            # 尝试直接解析JSON
+            import json
+            metric_data = json.loads(metric_table_json)
+            
+            # 如果是列表格式（新格式），转换为DataFrame
+            if isinstance(metric_data, list):
+                metric_df = pd.DataFrame(metric_data)
+            else:
+                # 如果是DataFrame格式（旧格式），直接用pandas读取
+                metric_df = pd.read_json(metric_table_json)
+        except Exception as e:
+            logger.error(f"解析指标数据失败: {e}")
+            # 创建一个空的DataFrame以防止程序崩溃
+            metric_df = pd.DataFrame()
         
         # 2. 获取相关指标数据
         relevant_metrics = self._get_relevant_metrics(task, metric_df)
@@ -48,7 +62,12 @@ class WriteSection(Action):
     
     def _get_relevant_metrics(self, task: Task, metric_df: pd.DataFrame) -> pd.DataFrame:
         """获取与任务相关的指标数据"""
-        if not task.metric_ids:
+        if not task.metric_ids or metric_df.empty:
+            return pd.DataFrame()
+        
+        # 检查DataFrame是否有必要的列
+        if 'metric_id' not in metric_df.columns:
+            logger.warning("指标数据中缺少metric_id列，返回空DataFrame")
             return pd.DataFrame()
         
         relevant_metrics = metric_df[metric_df['metric_id'].isin(task.metric_ids)]

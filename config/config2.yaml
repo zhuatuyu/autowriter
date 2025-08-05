@@ -5,6 +5,14 @@ llm:
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"  # or forward url / other llm url
   api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
 
+# RAG Embedding - 阿里云DashScope嵌入模型配置
+embedding:
+  api_type: "openai"  # 兼容OpenAI API格式
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
+  model: "text-embedding-v4"  # 阿里云官方模型名称
+  dimensions: 1024  # 输出向量维度
+
 # 阿里云OpenSearch搜索引擎配置
 search:
   api_type: "alibaba"  # 改为 alibaba，而不是 custom

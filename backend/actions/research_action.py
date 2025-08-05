@@ -73,24 +73,51 @@ WEB_CONTENT_ANALYSIS_PROMPT = """### 要求
 GENERATE_RESEARCH_BRIEF_PROMPT = """### 参考信息
 {content}
 
-### 要求
-请根据以上参考信息，生成一份关于主题"{topic}"的综合性研究简报。简报必须满足以下要求：
+### 指令
+你是一名顶级的AI研究分析师，你的目标是为下游的报告架构师提供一份充满洞察力的前期调研简报。
+请根据以上参考信息（包含网络案例和本地知识库），围绕主题“{topic}”生成一份高质量的研究简报。
 
-**结构要求：**
-1. **执行摘要** - 核心发现和关键洞察
-2. **市场背景** - 行业现状和趋势分析  
-3. **最佳实践** - 成功案例和经验总结
-4. **技术方案** - 相关技术和实施方法
-5. **关键指标** - 重要的量化数据和KPI
-6. **风险与挑战** - 潜在问题和应对策略
-7. **建议与结论** - 基于研究的专业建议
+简报标题格式应为：**《当前项目绩效评价报告前期调研简报》**
 
-**质量要求：**
-- 内容客观、准确、有据可查
-- 结构清晰，逻辑严密
-- 重点突出关键信息和数据
-- 为后续的架构设计和内容生成提供有价值的参考
-- 使用Markdown格式，长度不少于1500字
+### 简报结构要求 (请严格遵循)
+
+**1. 项目立项背景及目的分析**
+   - **分析要求**: 综合网络案例和本地资料，分析此类项目通常在何种背景下立项，其核心目的是什么。
+   - **给架构师的建议**: 指出在撰写最终报告的“项目概述”章节时，应重点突出哪些背景因素和项目目的，以彰显其必要性和重要性。
+
+**2. 项目主要内容洞察**
+   - **分析要求**: 剖析不同行业的类似绩效报告通常包含哪些核心内容。结合本地资料，提炼出本次报告应重点关注的几个方面。
+   - **给架构师的建议**: 为报告的“项目概述”部分提供内容建议，指出哪些是必须包含的关键模块。
+
+**3. 资金投入和使用情况分析**
+   - **分析要求**: 总结网络案例中关于资金管理和使用的经验与教训。
+   - **给架构师的建议**: 提醒架构师在设计“资金使用”相关章节时，应引导写作者重点关注哪些数据（如预算执行率、资金到位及时性等），并可以从哪些角度进行分析。
+
+**4. 项目实施与组织管理经验借鉴**
+   - **分析要求**: 从参考信息中提炼出项目实施和组织管理方面的最佳实践或常见问题。
+   - **给架构师的建议**: 为报告的“组织管理”部分提供写作方向，例如可以借鉴哪些管理模式，或者需要规避哪些常见风险。
+
+**5. 绩效目标设定要点**
+   - **分析要求**: 基于对四个维度（决策、过程、产出、效益）的理解，分析网络案例中是如何设定绩效目标的。
+   - **给架构师的建议**: 指出在设计报告的“绩效目标”部分时，四个维度分别可以从哪些角度进行目标设定，并提供可以借鉴的目标描述方式。**这不是最终的指标，而是目标设定的思路和方向**。
+
+**6. 存在的问题和原因分析**
+   - **分析要求**: 基于网络案例和本地资料，归纳总结类似项目在实施过程中普遍存在的问题（如资金使用效率低、目标达成率不足、监管缺位等）。
+   - **给架构师的建议**: 预测当前项目可能面临的潜在风险和挑战。这部分内容将作为报告中“存在的问题”章节的重要参考，使得最终报告不仅能总结成绩，更能体现前瞻性的风险思考。
+
+**7. 改进建议与经验借鉴**
+   - **分析要求**: 深入分析成功案例是如何解决上述普遍问题的，提炼出可操作、可借鉴的改进措施和管理经验。
+   - **给架构师的建议**: 为报告的“改进建议”章节提供素材。这些基于真实案例的建议，将比泛泛而谈的通用建议更具说服力和可操作性。
+
+**8. 绩效评价体系推荐 (核心内容)**
+   - **分析要求**: 基于所有研究，为当前项目推荐一套绩效评价指标体系。
+   - **给架构师的建议**: 为“决策、过程、产出、效益”四个维度，**每个维度推荐5个具体、可衡量的评价指标**。指标应清晰，并简要说明推荐理由。这将是架构师设计指标体系的重要输入。
+
+### 质量要求
+- **深度洞察**: 不要简单罗列信息，要提炼观点、总结经验、给出建议。
+- **强力支持**: 简报的每一部分都应为下游的架构师提供清晰的、可操作的指导。
+- **格式清晰**: 使用Markdown格式，结构分明。
+
 
 **引用要求：**
 - 在简报末尾列出所有信息来源的URL
@@ -142,51 +169,6 @@ class PrepareDocuments(Action):
         
         logger.info(f"文档扫描完成，共读取 {len(docs)} 个文档")
         return Documents(docs=docs)
-
-
-class WriteReport(Action):
-    """
-    生成最终研究报告的Action
-    """
-    async def run(
-        self, 
-        topic: str, 
-        research_data: ResearchData,
-        project_repo: ProjectRepo = None
-    ) -> str:
-        """根据研究简报生成最终报告"""
-        logger.info(f"开始生成关于 '{topic}' 的最终报告")
-
-        prompt = f"""
-        ### 指令
-        你是一名顶级的行业分析师和报告撰写专家。
-        请根据以下提供的研究简报，撰写一份全面、深入、专业的最终分析报告。
-
-        ### 研究简报
-        {research_data.brief}
-
-        ### 报告要求
-        1.  **标题**: 报告标题应清晰、准确，例如："关于'{topic}'的综合分析报告"。
-        2.  **结构**: 报告应包含摘要、引言、主体分析（可分多章节）、数据洞察、结论与建议等部分，确保结构完整、逻辑清晰。
-        3.  **深度**: 在研究简报的基础上进行深化和扩展，提供更深层次的分析、见解和商业建议，而仅仅是重复简报内容。
-        4.  **专业性**: 使用专业、客观的商业语言，图文并茂（可用Markdown表格或Mermaid图表），增强报告的可读性和专业性。
-        5.  **完整性**: 确保报告内容的完整性和连贯性，最终成为一份可以直接交付的成品。
-        6.  **格式**: 使用Markdown格式撰写。
-
-        请开始撰写最终报告：
-        """
-
-        final_report = await self._aask(prompt)
-
-        if project_repo:
-            report_path = project_repo.docs_path / f"{topic}_final_report.md"
-            await project_repo.save(
-                filename=str(report_path.relative_to(project_repo.workdir)),
-                content=final_report
-            )
-            logger.info(f"最终报告已保存到: {report_path}")
-        
-        return final_report
 
 
 class ConductComprehensiveResearch(Action):
@@ -256,11 +238,7 @@ class ConductComprehensiveResearch(Action):
         )
 
         if project_repo:
-            # 使用docs仓库来保存研究简报
-            import re
-            safe_topic = re.sub(r'[<>:"/\\|?*\'"]', '_', topic)  # 替换文件系统不支持的字符
-            safe_topic = safe_topic.replace(' ', '_')  # 替换空格
-            docs_filename = f"{safe_topic}_research_brief.md"
+            docs_filename = "research_brief.md"  # 使用固定的文件名
             await project_repo.docs.save(filename=docs_filename, content=brief)
             brief_path = project_repo.docs.workdir / docs_filename
             logger.info(f"研究简报已保存到: {brief_path}")
@@ -282,7 +260,7 @@ class ConductComprehensiveResearch(Action):
         """
         try:
             from metagpt.rag.engines.simple import SimpleEngine
-            from metagpt.rag.schema import FAISSRetrieverConfig, VectorIndexConfig
+            # from metagpt.rag.schema import FAISSRetrieverConfig, VectorIndexConfig
             import tempfile
             import os
             

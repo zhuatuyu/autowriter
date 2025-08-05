@@ -34,7 +34,7 @@ class RobustSearchEnhancedQA(SearchEnhancedQA):
             resp = await self._aask(prompt)
             rewritten_query = self._extract_rewritten_query_robust(resp)
             
-            logger.info(f"查询成功改写: '{query}' -> '{rewritten_query}'")
+            logger.info(f"查询成功改写: '{query}' -> '忽略过长的rewritten_query'")
             return rewritten_query
             
         except Exception as e:

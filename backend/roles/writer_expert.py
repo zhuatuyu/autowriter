@@ -186,14 +186,18 @@ class WriterExpert(Role):
                 report_title=title
             )
             
-            # 保存最终报告到文件
+            # 保存最终报告到文件 - 添加时间戳避免覆盖
             if hasattr(self, '_project_repo') and self._project_repo:
                 try:
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    filename = f"final_report_{timestamp}.md"
+                    
                     await self._project_repo.docs.save(
-                        filename="final_report.md",
+                        filename=filename,
                         content=final_report
                     )
-                    logger.info(f"最终报告已保存到: {self._project_repo.docs.workdir}/final_report.md")
+                    logger.info(f"最终报告已保存到: {self._project_repo.docs.workdir}/{filename}")
                 except Exception as e:
                     logger.error(f"保存最终报告失败: {e}")
             

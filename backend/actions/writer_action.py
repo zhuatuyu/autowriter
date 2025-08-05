@@ -162,8 +162,16 @@ class IntegrateReport(Action):
         
         final_report = "\n".join(report_parts)
         
-        # 保存报告到文件
-        report_path = DEFAULT_WORKSPACE_ROOT / "final_report.md"
+        # 保存报告到文件 - 添加时间戳避免覆盖
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        report_filename = f"final_report_{timestamp}.md"
+        
+        if hasattr(self, '_project_repo') and self._project_repo:
+            report_path = self._project_repo.docs.workdir / report_filename
+        else:
+            report_path = DEFAULT_WORKSPACE_ROOT / report_filename
+        
         report_path.write_text(final_report, encoding='utf-8')
         
         logger.info(f"最终报告已保存到: {report_path}")

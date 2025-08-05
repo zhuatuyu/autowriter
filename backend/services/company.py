@@ -205,9 +205,9 @@ class Company:
             # 启动消息监控
             monitor_task = asyncio.create_task(self._monitor_team_messages(team))
             
-            # 启动团队任务 (增加轮次确保所有智能体都能参与)
+            # 启动团队任务 (增加轮次确保所有智能体都能参与，特别是Architect处理时间增长后)
             logger.info("🔄 启动团队SOP流程...")
-            team_task = asyncio.create_task(team.run(n_round=5))
+            team_task = asyncio.create_task(team.run(n_round=10))
             
             # 等待团队完成
             await team_task

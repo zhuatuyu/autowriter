@@ -185,7 +185,7 @@ class DesignReportStructure(Action):
         enriched_info = project_info.copy()
         enriched_info["rag_evidence"] = {}
         
-        logger.info(f"🔍 对 {len(search_keywords)} 个动态关键词进行RAG检索...")
+        logger.info(f"🔍 开始对 {len(search_keywords)} 个动态关键词进行RAG检索（请稍候）...")
         
         for keyword_group in search_keywords:
             category = keyword_group["category"]
@@ -200,7 +200,8 @@ class DesignReportStructure(Action):
             
             if category_evidence:
                 enriched_info["rag_evidence"][category] = category_evidence
-                logger.info(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
+                # 简化单个类别的日志输出
+                logger.debug(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
         
         logger.info(f"📋 RAG检索完成，丰富了 {len(enriched_info['rag_evidence'])} 个信息类别")
         return enriched_info
@@ -351,7 +352,7 @@ class DesignReportStructure(Action):
                 if hasattr(result, 'text') and result.text:
                     retrieved_texts.append(result.text.strip())
             
-            logger.info(f"🔍 向量检索找到 {len(retrieved_texts)} 条相关内容")
+            logger.debug(f"🔍 向量检索找到 {len(retrieved_texts)} 条相关内容")
             return retrieved_texts
             
         except Exception as e:

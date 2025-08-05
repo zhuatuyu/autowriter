@@ -25,7 +25,7 @@ class ProjectManager(Role):
         # 设置要执行的Action
         self.set_actions([CreateTaskPlan])
         
-        # 监听Architect的报告结构
+        # 监听Architect的报告结构输出
         self._watch([ArchitectAction])
 
     async def _act(self) -> Message:

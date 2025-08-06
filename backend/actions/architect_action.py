@@ -404,8 +404,8 @@ class DesignReportStructure(Action):
         步骤二：通过RAG检索丰富项目信息 - 动态生成检索关键词
         """
         if not self._research_data or not self._research_data.content_chunks:
-            logger.warning("向量知识库不可用，返回原始项目信息")
-            return project_info
+            logger.error("❌ 向量知识库不可用！无法进行RAG增强")
+            raise ValueError("向量知识库不可用，无法进行RAG增强。请确保ResearchData包含有效的content_chunks")
         
         # 动态生成检索关键词
         search_keywords = await self._generate_rag_search_keywords(project_info)
@@ -413,66 +413,25 @@ class DesignReportStructure(Action):
         enriched_info = project_info.copy()
         enriched_info["rag_evidence"] = {}
         
-        logger.info(f"🔍 开始对 {len(search_keywords)} 个动态关键词进行RAG检索（请稍候）...")
+        logger.info(f"🔍 开始对 {len(search_keywords)} 个动态关键词进行RAG检索...")
         
-        # 🚀 性能优化：批量处理embedding请求
-        all_keywords = []
-        keyword_to_category = {}
-        
+        # 逐个类别检索
         for keyword_group in search_keywords:
             category = keyword_group["category"]
             keywords = keyword_group["keywords"]
+            
+            category_evidence = []
             for keyword in keywords:
-                all_keywords.append(keyword)
-                keyword_to_category[keyword] = category
-        
-        # 🚀 尝试批量执行RAG检索，失败时自动降级
-        batch_success = False
-        try:
-            if len(all_keywords) > 5:  # 只有关键词较多时才使用批量模式
-                logger.info(f"🚀 尝试批量RAG检索 {len(all_keywords)} 个关键词...")
-                batch_results = await self._batch_vector_search_optimized(all_keywords, self._research_data.vector_store_path)
-                
-                # 检查结果是否有效
-                if batch_results and len(batch_results) == len(all_keywords):
-                    # 按类别组织结果
-                    for keyword, relevant_chunks in zip(all_keywords, batch_results):
-                        category = keyword_to_category[keyword]
-                        if category not in enriched_info["rag_evidence"]:
-                            enriched_info["rag_evidence"][category] = []
-                        
-                        if relevant_chunks:
-                            enriched_info["rag_evidence"][category].extend(relevant_chunks[:2])
-                    
-                    batch_success = True
-                    logger.info("✅ 批量RAG检索成功")
-                else:
-                    logger.warning("批量检索结果不完整，降级到逐个检索")
-            else:
-                logger.info(f"关键词数量较少({len(all_keywords)})，直接使用逐个检索")
-                
-        except Exception as e:
-            logger.warning(f"⚠️ 批量RAG检索失败，自动降级: {e}")
-        
-        # 如果批量失败或关键词较少，使用原有的逐个检索方式
-        if not batch_success:
-            logger.info("🔄 执行传统逐个RAG检索...")
-            for keyword_group in search_keywords:
-                category = keyword_group["category"]
-                keywords = keyword_group["keywords"]
-                
-                category_evidence = []
-                for keyword in keywords:
-                    try:
-                        relevant_chunks = await self._search_chunks(keyword, self._research_data.content_chunks)
-                        if relevant_chunks:
-                            category_evidence.extend(relevant_chunks[:2])
-                    except Exception as e:
-                        logger.warning(f"关键词 '{keyword}' 检索失败: {e}")
-                
-                if category_evidence:
-                    enriched_info["rag_evidence"][category] = category_evidence
-                    logger.debug(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
+                try:
+                    relevant_chunks = await self._search_chunks(keyword)
+                    if relevant_chunks:
+                        category_evidence.extend(relevant_chunks[:2])
+                except Exception as e:
+                    logger.warning(f"关键词 '{keyword}' 检索失败: {e}")
+            
+            if category_evidence:
+                enriched_info["rag_evidence"][category] = category_evidence
+                logger.debug(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
         
         # 最后清理重复内容并限制数量
         for category in enriched_info["rag_evidence"]:
@@ -513,209 +472,29 @@ class DesignReportStructure(Action):
                 {"category": "绩效指标", "keywords": ["评价指标", "成果产出", "效益分析"]}
             ]
     
-    async def _search_chunks(self, query: str, content_chunks: List[str]) -> List[str]:
-        """在内容块中搜索相关信息，尝试使用向量检索"""
+    async def _search_chunks(self, query: str) -> List[str]:
+        """
+        🚀 使用统一混合检索服务
+        """
         try:
-            # 首先尝试使用向量检索
+            from backend.services.hybrid_search import hybrid_search
+            
+            # 使用混合检索服务
             if self._research_data and hasattr(self._research_data, 'vector_store_path'):
-                vector_results = await self._vector_search(query, self._research_data.vector_store_path)
-                if vector_results:
-                    return vector_results[:3]  # 返回前3个最相关的
+                results = await hybrid_search.hybrid_search(
+                    query=query,
+                    project_vector_storage_path=self._research_data.vector_store_path,
+                    enable_global=True,  # 启用全局知识库
+                    global_top_k=2,      # 全局知识库返回2条
+                    project_top_k=3      # 项目知识库返回3条
+                )
+                
+                logger.debug(f"🔍 混合检索完成，查询: '{query}'，找到 {len(results) if results else 0} 条相关内容")
+                return results if results else []
+                    
         except Exception as e:
-            logger.warning(f"向量检索失败，降级到关键词检索: {e}")
-        
-        # 降级到关键词检索
-        query_keywords = self._extract_search_keywords(query)
-        
-        # 计算每个块的相关度
-        chunk_scores = []
-        for chunk in content_chunks:
-            score = self._calculate_chunk_relevance(chunk, query_keywords)
-            if score > 0:
-                chunk_scores.append((score, chunk))
-        
-        # 按相关度排序
-        chunk_scores.sort(reverse=True)
-        return [chunk for score, chunk in chunk_scores[:3]]  # 返回前3个最相关的
-    
-    async def _vector_search(self, query: str, vector_store_path: str) -> List[str]:
-        """使用向量检索搜索相关内容"""
-        try:
-            from metagpt.rag.engines.simple import SimpleEngine
-            from metagpt.rag.schema import FAISSRetrieverConfig, VectorIndexConfig
-            import os
-            
-            if not os.path.exists(vector_store_path):
-                logger.warning(f"向量库路径不存在: {vector_store_path}")
-                return []
-            
-            # 检查并加载已有的向量库
-            # 注意：这里需要使用PM创建的相同文件来初始化
-            vector_files = []
-            if os.path.isdir(vector_store_path):
-                vector_files = [os.path.join(vector_store_path, f) for f in os.listdir(vector_store_path) if f.endswith('.txt')]
-            
-            if not vector_files:
-                logger.warning(f"向量库目录为空: {vector_store_path}")
-                return []
-            
-            # 使用MetaGPT原生的RAG embedding工厂 - 这是正确的方式！
-            from llama_index.llms.openai import OpenAI as LlamaOpenAI
-            from pathlib import Path
-            from metagpt.config2 import Config
-            from metagpt.rag.factories.embedding import get_rag_embedding
-            
-            # 手动加载完整配置，确保embedding配置被正确读取
-            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
-            
-            # 获取LLM配置 - 使用兼容的模型名
-            llm_config = full_config.llm
-            llm = LlamaOpenAI(
-                api_key=llm_config.api_key,
-                base_url=llm_config.base_url,
-                model="gpt-3.5-turbo"  # 使用llama_index认识的模型名，实际会调用阿里云API
-            )
-            
-            # 使用MetaGPT原生embedding工厂 - 这会正确处理model_name参数
-            embed_model = get_rag_embedding(config=full_config)
-            # 阿里云DashScope embedding API限制批处理大小不能超过10
-            embed_model.embed_batch_size = 10
-            
-            engine = SimpleEngine.from_docs(
-                input_files=vector_files,  # 使用已存在的文件
-                llm=llm,  # 真实的LLM配置
-                embed_model=embed_model  # 真实的嵌入模型
-            )
-            
-            # 执行检索
-            results = await engine.aretrieve(query)
-            
-            # 提取内容
-            retrieved_texts = []
-            for result in results:
-                if hasattr(result, 'text') and result.text:
-                    retrieved_texts.append(result.text.strip())
-            
-            logger.debug(f"🔍 向量检索找到 {len(retrieved_texts)} 条相关内容")
-            return retrieved_texts
-            
-        except Exception as e:
-            logger.error(f"向量检索执行失败: {e}")
+            logger.error(f"❌ 混合检索失败: {e}")
             return []
-    
-    async def _batch_vector_search_optimized(self, queries: List[str], vector_store_path: str) -> List[List[str]]:
-        """
-        🚀 批量向量检索优化版 - 利用阿里云DashScope批量embedding API
-        根据阿里云文档，支持最多25条文本的批量embedding，大幅减少HTTP请求次数
-        """
-        try:
-            from metagpt.rag.engines.simple import SimpleEngine
-            import os
-            
-            if not os.path.exists(vector_store_path):
-                logger.warning(f"向量库路径不存在: {vector_store_path}")
-                return [[] for _ in queries]
-            
-            vector_files = []
-            if os.path.isdir(vector_store_path):
-                vector_files = [os.path.join(vector_store_path, f) for f in os.listdir(vector_store_path) if f.endswith('.txt')]
-            
-            if not vector_files:
-                logger.warning(f"向量库目录为空: {vector_store_path}")
-                return [[] for _ in queries]
-            
-            # 使用MetaGPT原生的RAG引擎，但优化批量处理
-            from llama_index.llms.openai import OpenAI as LlamaOpenAI
-            from pathlib import Path
-            from metagpt.config2 import Config
-            from metagpt.rag.factories.embedding import get_rag_embedding
-            
-            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
-            llm_config = full_config.llm
-            llm = LlamaOpenAI(
-                api_key=llm_config.api_key,
-                base_url=llm_config.base_url,
-                model="gpt-3.5-turbo"
-            )
-            
-            embed_model = get_rag_embedding(config=full_config)
-            # 🚀 关键优化：设置批量大小，利用阿里云批量embedding API  
-            # 实际测试发现阿里云限制是10，不是文档中的25
-            # 为安全起见，设置为更保守的值
-            safe_batch_size = min(8, len(queries), 8)  # 最大不超过8
-            embed_model.embed_batch_size = safe_batch_size
-            
-            # 验证查询长度，确保每个查询不超过token限制
-            validated_queries = []
-            for query in queries:
-                if len(query) > 100:  # 简单字符数限制，避免token超标
-                    validated_queries.append(query[:100] + "...")
-                else:
-                    validated_queries.append(query)
-            
-            if len(validated_queries) != len(queries):
-                logger.warning(f"部分查询过长，已截断处理")
-            
-            engine = SimpleEngine.from_docs(
-                input_files=vector_files,
-                llm=llm,
-                embed_model=embed_model
-            )
-            
-            # 批量执行检索 - 减少HTTP请求次数
-            results = []
-            batch_size = 8  # 合理的批次大小，避免超时
-            
-            logger.info(f"🚀 开始批量RAG检索 {len(validated_queries)} 个查询，embedding批次大小: {embed_model.embed_batch_size}")
-            
-            for i in range(0, len(validated_queries), batch_size):
-                batch_queries = validated_queries[i:i+batch_size]
-                batch_results = []
-                
-                for query in batch_queries:
-                    try:
-                        query_results = await engine.aretrieve(query)
-                        if query_results:
-                            batch_results.append([result.text.strip() for result in query_results[:3]])
-                        else:
-                            batch_results.append([])
-                    except Exception as e:
-                        logger.warning(f"单个查询检索失败: {e}")
-                        batch_results.append([])
-                
-                results.extend(batch_results)
-                logger.debug(f"完成批次 {i//batch_size + 1}/{(len(validated_queries)-1)//batch_size + 1}")
-            
-            logger.info(f"✅ 批量RAG检索完成，总共处理 {len(validated_queries)} 个查询")
-            return results
-            
-        except Exception as e:
-            logger.error(f"批量向量检索失败: {e}")
-            # 降级返回空结果
-            return [[] for _ in queries]
-    
-    def _extract_search_keywords(self, query: str) -> List[str]:
-        """从查询中提取关键词"""
-        # 去除停用词，提取有意义的词汇
-        stopwords = {'的', '了', '和', '与', '及', '以及', '如何', '什么', '哪些', '怎样'}
-        words = re.findall(r'[\u4e00-\u9fff]+', query)
-        keywords = [word for word in words if len(word) > 1 and word not in stopwords]
-        return keywords
-    
-    def _calculate_chunk_relevance(self, chunk: str, keywords: List[str]) -> float:
-        """计算内容块与关键词的相关度"""
-        score = 0
-        chunk_lower = chunk.lower()
-        
-        for keyword in keywords:
-            keyword_lower = keyword.lower()
-            if keyword_lower in chunk_lower:
-                # 计算关键词在文本中的密度
-                count = chunk_lower.count(keyword_lower)
-                score += count * len(keyword)  # 长关键词权重更高
-        
-        # 标准化分数
-        return score / max(len(chunk), 1)
     
     async def _generate_customized_template(self, enriched_info: dict) -> Tuple[ReportStructure, MetricAnalysisTable]:
         """

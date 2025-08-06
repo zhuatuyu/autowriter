@@ -133,8 +133,8 @@ class Architect(Role):
                 break
         
         if not research_brief:
-            research_brief = "No research data available"
-            logger.warning("未找到有效的研究数据，使用默认值")
+            logger.error("❌ 未找到有效的研究数据！无法进行架构设计")
+            raise ValueError("未找到有效的研究数据，无法进行架构设计。请确保ProductManager已完成研究")
         
         logger.info(f"📄 成功获取研究简报，长度: {len(research_brief)} 字符")
         if self._current_research_data:

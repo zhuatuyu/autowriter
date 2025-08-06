@@ -4,8 +4,6 @@ Actions模块
 """
 
 from .writer_action import WriteSection, IntegrateReport, EvaluateMetrics
-# 案例研究Action
-from .case_research import CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch
 # 新的核心Action
 from .research_action import PrepareDocuments, ConductComprehensiveResearch, ResearchData, Documents
 from .architect_action import DesignReportStructure, ReportStructure, MetricAnalysisTable
@@ -16,10 +14,6 @@ __all__ = [
     "WriteSection",
     "IntegrateReport",
     "EvaluateMetrics",
-    # 案例研究Action
-    "CollectCaseLinks",
-    "WebBrowseAndSummarizeCase", 
-    "ConductCaseResearch",
     # 新的核心Action和数据模型
     "PrepareDocuments",
     "ConductComprehensiveResearch",

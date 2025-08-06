@@ -167,57 +167,30 @@ class EvaluateMetrics(Action):
     
     async def _retrieve_metric_facts(self, metric_name: str, vector_store_path: str) -> str:
         """
-        为指标检索相关事实依据
+        🚀 使用统一混合检索接口为指标检索相关事实依据
         """
         try:
-            from metagpt.rag.engines.simple import SimpleEngine
-            from llama_index.llms.openai import OpenAI as LlamaOpenAI
-            from pathlib import Path
-            from metagpt.config2 import Config
-            from metagpt.rag.factories.embedding import get_rag_embedding
-            import os
+            from backend.services.hybrid_search import hybrid_search
             
-            if not os.path.exists(vector_store_path):
-                return f"向量库不可用，无法检索关于'{metric_name}'的事实依据。"
-            
-            vector_files = []
-            if os.path.isdir(vector_store_path):
-                vector_files = [os.path.join(vector_store_path, f) for f in os.listdir(vector_store_path) if f.endswith('.txt')]
-            
-            if not vector_files:
-                return f"向量库为空，无法检索关于'{metric_name}'的事实依据。"
-            
-            # 使用MetaGPT原生的RAG引擎
-            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
-            llm_config = full_config.llm
-            llm = LlamaOpenAI(
-                api_key=llm_config.api_key,
-                base_url=llm_config.base_url,
-                model="gpt-3.5-turbo"
+            # 使用统一的混合检索服务
+            results = await hybrid_search.hybrid_search(
+                query=metric_name,
+                project_vector_storage_path=vector_store_path,
+                enable_global=True,
+                global_top_k=2,
+                project_top_k=3
             )
-            
-            embed_model = get_rag_embedding(config=full_config)
-            embed_model.embed_batch_size = 10
-            
-            engine = SimpleEngine.from_docs(
-                input_files=vector_files,
-                llm=llm,
-                embed_model=embed_model
-            )
-            
-            # 执行检索
-            results = await engine.aretrieve(metric_name)
             
             if results:
-                facts = "\n\n".join([result.text.strip() for result in results[:3]])
-                logger.debug(f"成功检索到关于'{metric_name}'的事实依据")
+                facts = "\n\n".join(results)
+                logger.info(f"🔍 为指标'{metric_name}'检索到 {len(results)} 条事实依据")
                 return facts
             else:
                 return f"未能检索到关于'{metric_name}'的相关事实依据。"
                 
         except Exception as e:
             logger.error(f"检索指标事实失败: {e}")
-            return f"检索过程发生错误：{str(e)}"
+            return f"检索失败，无法获取关于'{metric_name}'的事实依据。"
     
     async def _evaluate_element_compliance(self, facts: str, evaluation_points: list, scoring_method: str) -> tuple:
         """
@@ -454,10 +427,10 @@ class EvaluateMetrics(Action):
         try:
             result = await self._aask(evaluation_prompt, [WRITER_BASE_SYSTEM])
             parsed = self._extract_json_from_evaluation_response(result)
-            return parsed.get("score", 60), parsed.get("opinion", "默认评价意见")
+            return parsed.get("score", 0), parsed.get("opinion", "")
         except Exception as e:
-            logger.error(f"默认评价失败: {e}")
-            return 60, f"默认评价：基于有限信息给出中等评价"
+            logger.error(f"❌ 默认评价失败: {e}")
+            raise e  # 不提供默认值，让错误暴露
     
     def _extract_json_from_evaluation_response(self, response: str) -> dict:
         """
@@ -575,75 +548,40 @@ class WriteSection(Action):
         
         # 检查DataFrame是否有必要的列
         if 'metric_id' not in metric_df.columns:
-            logger.warning("指标数据中缺少metric_id列，返回空DataFrame")
-            return pd.DataFrame()
+            logger.error("❌ 指标数据中缺少metric_id列！数据结构不正确")
+            raise ValueError("指标数据中缺少metric_id列，无法匹配任务指标。请检查指标表格式")
         
         relevant_metrics = metric_df[metric_df['metric_id'].isin(task.metric_ids)]
         return relevant_metrics
     
     async def _retrieve_factual_basis(self, task: Task, vector_store_path: str) -> str:
-        """从向量索引中检索相关的事实依据"""
+        """🚀 使用统一混合检索接口检索相关的事实依据"""
         try:
-            from metagpt.rag.engines.simple import SimpleEngine
-            from llama_index.llms.openai import OpenAI as LlamaOpenAI
-            from pathlib import Path
-            from metagpt.config2 import Config
-            from metagpt.rag.factories.embedding import get_rag_embedding
-            import os
-            
-            if not os.path.exists(vector_store_path):
-                logger.warning(f"向量库路径不存在: {vector_store_path}")
-                return f"向量库不可用，无法检索关于'{task.section_title}'的事实依据。"
-            
-            # 检查向量库文件
-            vector_files = []
-            if os.path.isdir(vector_store_path):
-                vector_files = [os.path.join(vector_store_path, f) for f in os.listdir(vector_store_path) if f.endswith('.txt')]
-            
-            if not vector_files:
-                logger.warning(f"向量库目录为空: {vector_store_path}")
-                return f"向量库为空，无法检索关于'{task.section_title}'的事实依据。"
-            
-            # 使用MetaGPT原生的RAG引擎
-            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
-            
-            # 获取LLM配置
-            llm_config = full_config.llm
-            llm = LlamaOpenAI(
-                api_key=llm_config.api_key,
-                base_url=llm_config.base_url,
-                model="gpt-3.5-turbo"
-            )
-            
-            # 使用MetaGPT原生embedding工厂
-            embed_model = get_rag_embedding(config=full_config)
-            embed_model.embed_batch_size = 10
-            
-            engine = SimpleEngine.from_docs(
-                input_files=vector_files,
-                llm=llm,
-                embed_model=embed_model
-            )
+            from backend.services.hybrid_search import hybrid_search
             
             # 构建检索查询 - 结合章节标题和写作要求
             search_query = f"{task.section_title} {task.instruction[:200]}"
             
-            # 执行检索
-            results = await engine.aretrieve(search_query)
+            # 使用统一的混合检索服务
+            results = await hybrid_search.hybrid_search(
+                query=search_query,
+                project_vector_storage_path=vector_store_path,
+                enable_global=True,
+                global_top_k=2,
+                project_top_k=4
+            )
             
             # 提取检索到的内容
-            factual_basis = ""
             if results:
                 factual_basis = "\n\n".join([
-                    f"**相关资料{i+1}**: {result.text.strip()}" 
-                    for i, result in enumerate(results[:3])  # 取前3个最相关的结果
+                    f"**相关资料{i+1}**: {result}" 
+                    for i, result in enumerate(results[:6])  # 取前6个最相关的结果
                 ])
-                logger.info(f"成功从向量库检索到 {len(results)} 条相关信息用于章节: {task.section_title}")
+                logger.info(f"🔍 成功检索到 {len(results)} 条相关信息用于章节: {task.section_title}")
+                return factual_basis
             else:
-                factual_basis = f"未能从向量库中检索到关于'{task.section_title}'的相关信息。"
-                logger.warning(f"向量检索未返回结果: {task.section_title}")
-            
-            return factual_basis
+                logger.warning(f"未检索到结果: {task.section_title}")
+                return f"未能检索到关于'{task.section_title}'的相关信息。"
             
         except Exception as e:
             logger.error(f"向量检索失败: {e}")

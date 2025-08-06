@@ -60,8 +60,8 @@ class ProductManager(Role):
         
         uploads_path = Path(self._project_repo.workdir) / "uploads"
         if not uploads_path.exists():
-            logger.warning(f"上传目录不存在: {uploads_path}，跳过文档准备。")
-            documents = Documents(docs=[])
+            logger.error(f"❌ 上传目录不存在: {uploads_path}")
+            raise FileNotFoundError(f"项目上传目录不存在: {uploads_path}。请确保项目结构正确")
         else:
             documents = await prepare_action.run(uploads_path)
 

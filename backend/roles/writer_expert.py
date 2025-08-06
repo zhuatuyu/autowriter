@@ -6,7 +6,7 @@ from metagpt.roles import Role
 from metagpt.schema import Message
 from metagpt.logs import logger
 
-from backend.actions.writer_action import WriteSection, IntegrateReport
+from backend.actions.writer_action import WriteSection, IntegrateReport, EvaluateMetrics
 from backend.actions.pm_action import CreateTaskPlan, TaskPlan, Task
 from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
 from backend.actions.architect_action import DesignReportStructure as ArchitectAction, MetricAnalysisTable, ArchitectOutput
@@ -24,7 +24,7 @@ class WriterExpert(Role):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        self.set_actions([WriteSection, IntegrateReport])
+        self.set_actions([WriteSection, EvaluateMetrics, IntegrateReport])
         self._watch([CreateTaskPlan, ConductComprehensiveResearch, ArchitectAction])
 
     async def _act(self) -> Message:
@@ -154,15 +154,20 @@ class WriterExpert(Role):
                     metric_data = str(instruct_content)
                     logger.info(f"✅ 使用整个字典作为metric_data")
             
-            # 为每个任务生成章节内容
+            # === 新的完整工作流程 ===
+            
+            # 阶段1: 主报告章节写作
+            logger.info("📝 阶段1: 开始主报告章节写作...")
             sections = []
             write_action = WriteSection()
             
             for i, task in enumerate(tasks):
                 try:
                     task_obj = task if hasattr(task, 'section_title') else Task(
+                        task_id=i,
                         section_title=task.get('section_title', f'章节{i+1}'),
-                        description=task.get('description', '分析内容')
+                        instruction=task.get('instruction', task.get('description', '分析内容')),
+                        metric_ids=task.get('metric_ids', [])
                     )
                     
                     section_content = await write_action.run(
@@ -171,7 +176,7 @@ class WriterExpert(Role):
                         metric_table_json=metric_data
                     )
                     sections.append(section_content)
-                    logger.info(f"完成章节: {task_obj.section_title}")
+                    logger.info(f"✅ 完成主报告章节: {task_obj.section_title}")
                 except Exception as e:
                     logger.error(f"生成章节{i+1}失败: {e}")
                     # 生成一个简单的默认章节
@@ -179,11 +184,43 @@ class WriterExpert(Role):
                     default_content = f"# {section_title}\n\n基于研究数据的分析内容。\n"
                     sections.append(default_content)
             
-            # 整合最终报告
+            # 阶段2: 指标评分处理
+            logger.info("📊 阶段2: 开始指标评分处理...")
+            metrics_evaluation_result = {}
+            try:
+                evaluate_action = EvaluateMetrics()
+                metrics_evaluation_result = await evaluate_action.run(
+                    metric_table_json=metric_data,
+                    vector_store_path=vector_store_path
+                )
+                
+                if "error" in metrics_evaluation_result:
+                    logger.error(f"指标评分失败: {metrics_evaluation_result}")
+                    metrics_evaluation_result = {
+                        "metrics_scores": [],
+                        "level1_summary": {"决策": 0, "过程": 0, "产出": 0, "效益": 0},
+                        "total_score": 0,
+                        "grade": "评分失败"
+                    }
+                else:
+                    logger.info(f"✅ 指标评分完成，总分: {metrics_evaluation_result.get('total_score', 0)}分")
+                    
+            except Exception as e:
+                logger.error(f"指标评分阶段失败: {e}")
+                metrics_evaluation_result = {
+                    "metrics_scores": [],
+                    "level1_summary": {"决策": 0, "过程": 0, "产出": 0, "效益": 0},
+                    "total_score": 0,
+                    "grade": "评分失败"
+                }
+            
+            # 阶段3: 整合最终报告
+            logger.info("📄 阶段3: 开始整合最终报告...")
             integrate_action = IntegrateReport()
             final_report = await integrate_action.run(
                 sections=sections,
-                report_title=title
+                report_title=title,
+                metrics_evaluation=metrics_evaluation_result  # 传入指标评分结果
             )
             
             # 保存最终报告到文件 - 添加时间戳避免覆盖

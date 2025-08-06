@@ -3,7 +3,7 @@ Actions模块
 符合MetaGPT标准的各种智能体动作
 """
 
-from .writer_action import WriteContent, SummarizeText, PolishContent, ReviewContent, WriteSection, IntegrateReport
+from .writer_action import WriteSection, IntegrateReport, EvaluateMetrics
 # 案例研究Action
 from .case_research import CollectCaseLinks, WebBrowseAndSummarizeCase, ConductCaseResearch
 # 新的核心Action
@@ -12,13 +12,10 @@ from .architect_action import DesignReportStructure, ReportStructure, MetricAnal
 from .pm_action import CreateTaskPlan, TaskPlan, Task
 
 __all__ = [
-    # 原有的写作Action
-    "WriteContent",
-    "SummarizeText", 
-    "PolishContent",
-    "ReviewContent",
+    # 写作专家Action
     "WriteSection",
     "IntegrateReport",
+    "EvaluateMetrics",
     # 案例研究Action
     "CollectCaseLinks",
     "WebBrowseAndSummarizeCase", 

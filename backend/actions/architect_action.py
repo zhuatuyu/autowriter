@@ -13,6 +13,254 @@ from metagpt.logs import logger
 from backend.actions.research_action import ResearchData
 
 
+# --- 架构师专用提示词模板 ---
+ARCHITECT_BASE_SYSTEM = """你是绩效评价报告的架构师。你的目标是：
+1. 深入分析研究简报，提取项目核心信息
+2. 基于标准绩效评价框架设计报告结构
+3. 构建科学的指标体系，确保评价的全面性和准确性
+"""
+
+PROJECT_INFO_EXTRACTION_PROMPT = """你是绩效评价报告的架构师。请从以下研究简报中提取项目的核心信息，用于后续基于标准模板的报告结构设计。
+
+研究简报：
+{research_brief}
+
+请返回JSON格式，包含以下字段：
+1. project_name: 项目全称
+2. project_type: 项目类型（如：财政支出项目、专项资金项目等）
+3. budget_amount: 项目预算金额（如果有）
+4. implementation_period: 实施期间
+5. target_beneficiaries: 主要受益对象
+6. main_objectives: 主要目标（列表形式）
+7. key_activities: 主要活动内容（列表形式）
+8. performance_focus: 绩效重点关注领域（如：经济效益、社会效益、生态效益等）
+
+要求：
+- 信息要准确、完整
+- 如果某些信息不明确，标注为"待补充"
+- 重点关注与绩效评价相关的信息
+"""
+
+RAG_KEYWORDS_GENERATION_PROMPT = """你是架构师的RAG检索助手。基于以下项目信息，生成用于检索向量知识库的关键词组。
+
+项目信息：
+{project_info}
+
+请生成6个类别的检索关键词，每个类别包含3-5个具体的检索词：
+
+返回JSON格式：
+[
+  {{
+    "category": "项目背景与目标",
+    "keywords": ["项目立项背景", "主要目标", "预期成果"]
+  }},
+  {{
+    "category": "资金与预算",
+    "keywords": ["预算总额", "资金来源", "资金分配"]
+  }},
+  {{
+    "category": "实施方案",
+    "keywords": ["实施步骤", "技术方案", "管理措施"]
+  }},
+  {{
+    "category": "效果与成效",
+    "keywords": ["实施效果", "产出指标", "效益分析"]
+  }},
+  {{
+    "category": "政策依据",
+    "keywords": ["政策文件", "法规依据", "标准规范"]
+  }},
+  {{
+    "category": "风险与挑战",
+    "keywords": ["存在问题", "风险因素", "改进建议"]
+  }}
+]
+
+要求：关键词要具体、准确，能在{project_name}相关资料中找到对应信息。
+"""
+
+SECTION_PROMPT_GENERATION_TEMPLATE = """针对{project_name}，{base_prompt}
+
+### 📋 具体写作指导与检索要求：
+
+{rag_instructions}
+
+### 🔍 RAG检索策略：
+写作时请严格按照以下步骤进行：
+1. 首先检索上述关键信息项，获取具体数据和事实
+2. 基于检索到的真实信息进行分析和论述
+3. 避免泛泛而谈，确保每个论点都有具体的数据支撑
+4. 如果某项信息检索不到，明确标注"信息待补充"
+
+### 📊 质量要求：
+- 数据准确：所有数字、时间、名称必须来自检索到的原始资料
+- 逻辑清晰：按照检索指导的顺序组织内容结构
+- 深度分析：不仅要列出事实，还要分析原因和影响
+"""
+
+METRICS_DESIGN_PROMPT = """你是绩效评价指标体系的架构师。请基于以下项目信息，设计一套完整的绩效评价指标体系。
+
+项目信息：
+{project_info}
+
+指标体系设计要求：
+1. 一级指标权重分配：决策(15分)、过程(25分)、产出(35分)、效益(25分)
+2. 每个一级指标下设置2-3个具体指标
+3. 每个指标必须选择一种评价类型，共6种可选：
+   - "要素符合度计分": 根据符合的要素数量计分
+   - "公式计算得分": 通过数学公式计算得分  
+   - "条件判断得分": 根据是否满足条件计分
+   - "定性与定量结合": 综合定性和定量评价
+   - "递减扣分机制": 从满分开始根据问题扣分
+   - "李克特量表法": 通过满意度调查计分
+
+请返回JSON格式，每个指标包含：
+- metric_id: 唯一标识（英文）
+- name: 指标名称（中文）
+- category: 指标分类
+- 一级指标: "决策"/"过程"/"产出"/"效益"
+- 二级指标: 具体的二级指标名称
+- 三级指标: 具体的三级指标名称
+- 分值: 该指标权重分值（与一级指标权重匹配）
+- evaluation_type: 评价类型（必须选择上述6种之一）
+- evaluation_points: 具体评价要点（数组格式，如["①立项符合法规","②符合规划"]）
+- scoring_method: 详细计分方式（如"具备一个要素得20%分值"）
+- 评分过程: Writer执行评价的具体指导
+
+⚠️ 重要格式要求：
+- 所有字段名必须使用英文或中文，不能混用
+- scoring_method字段必须一致，不能使用"评分方法"或"scoring方法"
+- 确保JSON格式完全正确，所有字段都有值
+
+标准示例：
+[
+  {{
+    "metric_id": "policy_compliance",
+    "name": "政策合规性",
+    "category": "决策指标",
+    "一级指标": "决策",
+    "二级指标": "政策符合性",
+    "三级指标": "政策合规率",
+    "分值": 7.5,
+    "evaluation_type": "要素符合度计分",
+    "evaluation_points": [
+      "①项目立项符合国家法律法规、国民经济发展规划和相关政策",
+      "②项目立项符合行业发展规划和政策要求",
+      "③项目立项与部门职责范围相符，属于部门履职所需",
+      "④项目属于公共财政支持范围，符合中央、地方事权支出责任划分原则",
+      "⑤该项目与相关部门同类项目或者部门内部相关项目无交叉重复"
+    ],
+    "scoring_method": "具备一个得分要素，得到指标分值的20%",
+    "评分过程": "Writer需核对项目文件与国家、地方政府政策的匹配程度，检查相关法律法规引用情况及政策依据材料，对照评价要点逐一判断符合情况"
+  }}
+]
+
+请为{project_name}（{project_type}）设计8-12个指标，确保：
+- 决策类指标总分值=15分
+- 过程类指标总分值=25分  
+- 产出类指标总分值=35分
+- 效益类指标总分值=25分
+- 每个指标都有明确的评价类型和详细评价要点
+"""
+
+# 6种标准化评价类型定义
+EVALUATION_TYPES = {
+    "要素符合度计分": {
+        "description": "根据各项要素的符合情况进行计分",
+        "scoring_guidance": """要素符合度计分计算步骤：
+1. 从事实中识别符合的要素（如"符合评价要点①②"）
+2. 从规则中提取每个要素的分值
+3. 将符合要素的分值相加得到最终得分
+
+示例：事实"符合①②，不符合③"，规则"①②各30%，③40%"
+计算：30+30+0=60分""",
+        "opinion_requirements": """- 必须包含具体的法规引用、文件名称等详实内容
+- 明确列出每个评价要点的符合/不符合情况
+- 使用分号分隔各要点的评价
+- 不得包含任何最终得分或结论性语句"""
+    },
+    
+    "公式计算得分": {
+        "description": "通过特定公式计算得出分数",
+        "scoring_guidance": """公式计算得分步骤：
+1. 从规则中找到计算公式
+2. 从事实中提取数值
+3. 代入公式计算，结果换算到100分制
+
+示例：预算执行率=实际支出/预算金额×100%
+实际支出800万，预算1000万
+计算：800/1000×100%=80%，得80分""",
+        "opinion_requirements": """- 必须列出具体的计算数据和来源
+- 展示完整的计算公式和计算过程
+- 如有多年数据，需计算加权平均值
+- 百分比保留两位小数
+- 不得包含任何最终得分或结论性语句"""
+    },
+    
+    "条件判断得分": {
+        "description": "根据是否满足特定条件来计分",
+        "scoring_guidance": """条件判断得分步骤：
+1. 识别事实满足的条件档次
+2. 给予该档次对应的分数
+
+示例：条件"项目有完整预算"，事实"项目编制了详细预算"
+判断：满足条件，得100分""",
+        "opinion_requirements": """- 明确说明每个条件的满足/不满足情况
+- 提供具体的证据材料或事实依据
+- 对于不满足的条件，说明具体缺失什么
+- 不得包含任何最终得分或结论性语句"""
+    },
+    
+    "定性与定量结合": {
+        "description": "结合定性描述和定量数据进行评价",
+        "scoring_guidance": """定性与定量结合步骤：
+1. 分别计算定量和定性部分分数
+2. 按权重合并分数
+
+示例：定量部分（60%权重）：完成率90%，得90分
+定性部分（40%权重）：质量优秀，得95分
+综合得分：90×0.6+95×0.4=92分""",
+        "opinion_requirements": """- 定量部分：列出具体数据、百分比、金额等
+- 定性部分：描述实地调研、访谈等发现的情况
+- 两部分要有机结合，不能割裂
+- 对于部分达标的情况，明确扣分比例
+- 不得包含任何最终得分或结论性语句"""
+    },
+    
+    "递减扣分机制": {
+        "description": "从满分开始根据问题情况进行扣分",
+        "scoring_guidance": """递减扣分机制步骤：
+1. 从满分开始
+2. 根据问题数量扣分
+3. 计算最终剩余分数
+
+示例：满分100分，每个问题扣10分
+发现3个问题，扣30分
+最终得分：100-30=70分""",
+        "opinion_requirements": """- 列出发现的每个问题及具体表现
+- 说明每类问题的扣分标准
+- 问题要具体到时间、地点、责任主体
+- 不得包含任何最终得分或结论性语句"""
+    },
+    
+    "李克特量表法": {
+        "description": "通过调查问卷和统计分析计算满意度",
+        "scoring_guidance": """李克特量表法步骤：
+1. 根据满意度百分比对应分数档次
+2. 或直接将满意度百分比作为得分
+
+示例：满意度调查结果92.8%
+90%以上为优秀，得满分
+最终得分：100分""",
+        "opinion_requirements": """- 说明调查方法和样本量
+- 列出各满意度等级的具体人数
+- 展示满意度计算公式和过程
+- 满意度百分比保留两位小数
+- 不得包含任何最终得分或结论性语句"""
+    }
+}
+
+
 class Section(BaseModel):
     """报告章节的结构化模型"""
     section_title: str = Field(..., description="章节标题")
@@ -90,30 +338,10 @@ class DesignReportStructure(Action):
         """
         步骤一：从研究简报中提取项目核心信息
         """
-        extraction_prompt = f"""
-你是绩效评价报告的架构师。请从以下研究简报中提取项目的核心信息，用于后续基于标准模板的报告结构设计。
-
-研究简报：
-{research_brief}
-
-请返回JSON格式，包含以下字段：
-1. project_name: 项目全称
-2. project_type: 项目类型（如：财政支出项目、专项资金项目等）
-3. budget_amount: 项目预算金额（如果有）
-4. implementation_period: 实施期间
-5. target_beneficiaries: 主要受益对象
-6. main_objectives: 主要目标（列表形式）
-7. key_activities: 主要活动内容（列表形式）
-8. performance_focus: 绩效重点关注领域（如：经济效益、社会效益、生态效益等）
-
-要求：
-- 信息要准确、完整
-- 如果某些信息不明确，标注为"待补充"
-- 重点关注与绩效评价相关的信息
-"""
+        extraction_prompt = PROJECT_INFO_EXTRACTION_PROMPT.format(research_brief=research_brief)
         
         try:
-            extraction_result = await self._aask(extraction_prompt)
+            extraction_result = await self._aask(extraction_prompt, [ARCHITECT_BASE_SYSTEM])
             
             # 从LLM回复中提取JSON内容
             project_info = self._extract_json_from_llm_response(extraction_result)
@@ -187,21 +415,71 @@ class DesignReportStructure(Action):
         
         logger.info(f"🔍 开始对 {len(search_keywords)} 个动态关键词进行RAG检索（请稍候）...")
         
+        # 🚀 性能优化：批量处理embedding请求
+        all_keywords = []
+        keyword_to_category = {}
+        
         for keyword_group in search_keywords:
             category = keyword_group["category"]
             keywords = keyword_group["keywords"]
-            
-            # 对每个关键词组进行检索
-            category_evidence = []
             for keyword in keywords:
-                relevant_chunks = await self._search_chunks(keyword, self._research_data.content_chunks)
-                if relevant_chunks:
-                    category_evidence.extend(relevant_chunks[:2])  # 每个关键词取前2个最相关的
-            
-            if category_evidence:
-                enriched_info["rag_evidence"][category] = category_evidence
-                # 简化单个类别的日志输出
-                logger.debug(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
+                all_keywords.append(keyword)
+                keyword_to_category[keyword] = category
+        
+        # 🚀 尝试批量执行RAG检索，失败时自动降级
+        batch_success = False
+        try:
+            if len(all_keywords) > 5:  # 只有关键词较多时才使用批量模式
+                logger.info(f"🚀 尝试批量RAG检索 {len(all_keywords)} 个关键词...")
+                batch_results = await self._batch_vector_search_optimized(all_keywords, self._research_data.vector_store_path)
+                
+                # 检查结果是否有效
+                if batch_results and len(batch_results) == len(all_keywords):
+                    # 按类别组织结果
+                    for keyword, relevant_chunks in zip(all_keywords, batch_results):
+                        category = keyword_to_category[keyword]
+                        if category not in enriched_info["rag_evidence"]:
+                            enriched_info["rag_evidence"][category] = []
+                        
+                        if relevant_chunks:
+                            enriched_info["rag_evidence"][category].extend(relevant_chunks[:2])
+                    
+                    batch_success = True
+                    logger.info("✅ 批量RAG检索成功")
+                else:
+                    logger.warning("批量检索结果不完整，降级到逐个检索")
+            else:
+                logger.info(f"关键词数量较少({len(all_keywords)})，直接使用逐个检索")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 批量RAG检索失败，自动降级: {e}")
+        
+        # 如果批量失败或关键词较少，使用原有的逐个检索方式
+        if not batch_success:
+            logger.info("🔄 执行传统逐个RAG检索...")
+            for keyword_group in search_keywords:
+                category = keyword_group["category"]
+                keywords = keyword_group["keywords"]
+                
+                category_evidence = []
+                for keyword in keywords:
+                    try:
+                        relevant_chunks = await self._search_chunks(keyword, self._research_data.content_chunks)
+                        if relevant_chunks:
+                            category_evidence.extend(relevant_chunks[:2])
+                    except Exception as e:
+                        logger.warning(f"关键词 '{keyword}' 检索失败: {e}")
+                
+                if category_evidence:
+                    enriched_info["rag_evidence"][category] = category_evidence
+                    logger.debug(f"📋 {category}: 检索到 {len(category_evidence)} 条相关证据")
+        
+        # 最后清理重复内容并限制数量
+        for category in enriched_info["rag_evidence"]:
+            # 去重并限制数量
+            unique_chunks = list(dict.fromkeys(enriched_info["rag_evidence"][category]))
+            enriched_info["rag_evidence"][category] = unique_chunks[:6]  # 每个类别最多6条
+            logger.debug(f"📋 {category}: 最终检索到 {len(enriched_info['rag_evidence'][category])} 条相关证据")
         
         logger.info(f"📋 RAG检索完成，丰富了 {len(enriched_info['rag_evidence'])} 个信息类别")
         return enriched_info
@@ -212,44 +490,10 @@ class DesignReportStructure(Action):
         """
         project_name = project_info.get('project_name', '项目')
         
-        keyword_generation_prompt = f"""
-你是架构师的RAG检索助手。基于以下项目信息，生成用于检索向量知识库的关键词组。
-
-项目信息：
-{json.dumps(project_info, ensure_ascii=False, indent=2)}
-
-请生成6个类别的检索关键词，每个类别包含3-5个具体的检索词：
-
-返回JSON格式：
-[
-  {{
-    "category": "项目背景与目标",
-    "keywords": ["项目立项背景", "主要目标", "预期成果"]
-  }},
-  {{
-    "category": "资金与预算",
-    "keywords": ["预算总额", "资金来源", "资金分配"]
-  }},
-  {{
-    "category": "实施方案",
-    "keywords": ["实施步骤", "技术方案", "管理措施"]
-  }},
-  {{
-    "category": "效果与成效",
-    "keywords": ["实施效果", "产出指标", "效益分析"]
-  }},
-  {{
-    "category": "政策依据",
-    "keywords": ["政策文件", "法规依据", "标准规范"]
-  }},
-  {{
-    "category": "风险与挑战",
-    "keywords": ["存在问题", "风险因素", "改进建议"]
-  }}
-]
-
-要求：关键词要具体、准确，能在{project_name}相关资料中找到对应信息。
-"""
+        keyword_generation_prompt = RAG_KEYWORDS_GENERATION_PROMPT.format(
+            project_info=json.dumps(project_info, ensure_ascii=False, indent=2),
+            project_name=project_name
+        )
         
         try:
             keywords_result = await self._aask(keyword_generation_prompt)
@@ -358,6 +602,97 @@ class DesignReportStructure(Action):
         except Exception as e:
             logger.error(f"向量检索执行失败: {e}")
             return []
+    
+    async def _batch_vector_search_optimized(self, queries: List[str], vector_store_path: str) -> List[List[str]]:
+        """
+        🚀 批量向量检索优化版 - 利用阿里云DashScope批量embedding API
+        根据阿里云文档，支持最多25条文本的批量embedding，大幅减少HTTP请求次数
+        """
+        try:
+            from metagpt.rag.engines.simple import SimpleEngine
+            import os
+            
+            if not os.path.exists(vector_store_path):
+                logger.warning(f"向量库路径不存在: {vector_store_path}")
+                return [[] for _ in queries]
+            
+            vector_files = []
+            if os.path.isdir(vector_store_path):
+                vector_files = [os.path.join(vector_store_path, f) for f in os.listdir(vector_store_path) if f.endswith('.txt')]
+            
+            if not vector_files:
+                logger.warning(f"向量库目录为空: {vector_store_path}")
+                return [[] for _ in queries]
+            
+            # 使用MetaGPT原生的RAG引擎，但优化批量处理
+            from llama_index.llms.openai import OpenAI as LlamaOpenAI
+            from pathlib import Path
+            from metagpt.config2 import Config
+            from metagpt.rag.factories.embedding import get_rag_embedding
+            
+            full_config = Config.from_yaml_file(Path('config/config2.yaml'))
+            llm_config = full_config.llm
+            llm = LlamaOpenAI(
+                api_key=llm_config.api_key,
+                base_url=llm_config.base_url,
+                model="gpt-3.5-turbo"
+            )
+            
+            embed_model = get_rag_embedding(config=full_config)
+            # 🚀 关键优化：设置批量大小，利用阿里云批量embedding API  
+            # 实际测试发现阿里云限制是10，不是文档中的25
+            # 为安全起见，设置为更保守的值
+            safe_batch_size = min(8, len(queries), 8)  # 最大不超过8
+            embed_model.embed_batch_size = safe_batch_size
+            
+            # 验证查询长度，确保每个查询不超过token限制
+            validated_queries = []
+            for query in queries:
+                if len(query) > 100:  # 简单字符数限制，避免token超标
+                    validated_queries.append(query[:100] + "...")
+                else:
+                    validated_queries.append(query)
+            
+            if len(validated_queries) != len(queries):
+                logger.warning(f"部分查询过长，已截断处理")
+            
+            engine = SimpleEngine.from_docs(
+                input_files=vector_files,
+                llm=llm,
+                embed_model=embed_model
+            )
+            
+            # 批量执行检索 - 减少HTTP请求次数
+            results = []
+            batch_size = 8  # 合理的批次大小，避免超时
+            
+            logger.info(f"🚀 开始批量RAG检索 {len(validated_queries)} 个查询，embedding批次大小: {embed_model.embed_batch_size}")
+            
+            for i in range(0, len(validated_queries), batch_size):
+                batch_queries = validated_queries[i:i+batch_size]
+                batch_results = []
+                
+                for query in batch_queries:
+                    try:
+                        query_results = await engine.aretrieve(query)
+                        if query_results:
+                            batch_results.append([result.text.strip() for result in query_results[:3]])
+                        else:
+                            batch_results.append([])
+                    except Exception as e:
+                        logger.warning(f"单个查询检索失败: {e}")
+                        batch_results.append([])
+                
+                results.extend(batch_results)
+                logger.debug(f"完成批次 {i//batch_size + 1}/{(len(validated_queries)-1)//batch_size + 1}")
+            
+            logger.info(f"✅ 批量RAG检索完成，总共处理 {len(validated_queries)} 个查询")
+            return results
+            
+        except Exception as e:
+            logger.error(f"批量向量检索失败: {e}")
+            # 降级返回空结果
+            return [[] for _ in queries]
     
     def _extract_search_keywords(self, query: str) -> List[str]:
         """从查询中提取关键词"""
@@ -477,25 +812,11 @@ class DesignReportStructure(Action):
         # 根据章节特点生成具体的RAG检索指导
         rag_instructions = await self._generate_chapter_rag_instructions(section_title, enriched_info)
         
-        customized_prompt = f"""
-针对{project_name}，{base_prompt}
-
-### 📋 具体写作指导与检索要求：
-
-{rag_instructions}
-
-### 🔍 RAG检索策略：
-写作时请严格按照以下步骤进行：
-1. 首先检索上述关键信息项，获取具体数据和事实
-2. 基于检索到的真实信息进行分析和论述
-3. 避免泛泛而谈，确保每个论点都有具体的数据支撑
-4. 如果某项信息检索不到，明确标注"信息待补充"
-
-### 📊 质量要求：
-- 数据准确：所有数字、时间、名称必须来自检索到的原始资料
-- 逻辑清晰：按照检索指导的顺序组织内容结构
-- 深度分析：不仅要列出事实，还要分析原因和影响
-"""
+        customized_prompt = SECTION_PROMPT_GENERATION_TEMPLATE.format(
+            project_name=project_name,
+            base_prompt=base_prompt,
+            rag_instructions=rag_instructions
+        )
         
         return customized_prompt
     
@@ -602,51 +923,14 @@ class DesignReportStructure(Action):
         project_type = enriched_info.get('project_type', '财政支出项目')
         
         # 构造指标设计prompt
-        metrics_design_prompt = f"""
-你是绩效评价指标体系的架构师。请基于以下项目信息，设计一套完整的绩效评价指标体系。
-
-项目信息：
-{json.dumps(enriched_info, ensure_ascii=False, indent=2)}
-
-指标体系设计要求：
-1. 一级指标固定为：决策、过程、产出、效益（每个一级指标下需要2-3个二级指标）
-2. 每个二级指标下设置1-2个三级指标
-3. 分值分配：决策(25分)、过程(25分)、产出(25分)、效益(25分)
-4. 指标要符合项目特点，具体、可衡量
-5. 评分规则要明确、可操作
-6. 评分过程要给出具体的评价方法指导
-
-请返回JSON格式，每个指标包含：
-- metric_id: 唯一标识（英文）
-- name: 指标名称（中文）
-- category: 指标分类
-- 一级指标: "决策"/"过程"/"产出"/"效益"
-- 二级指标: 具体的二级指标名称
-- 三级指标: 具体的三级指标名称
-- 分值: 数值（总计100分）
-- 评分规则: 该指标的评价标准和要求
-- 评分过程: 该指标的评价方法指导（告诉Writer如何进行评价）
-
-示例格式：
-[
-  {{
-    "metric_id": "project_necessity",
-    "name": "项目立项必要性",
-    "category": "决策指标",
-    "一级指标": "决策",
-    "二级指标": "立项决策",
-    "三级指标": "立项必要性",
-    "分值": 8.0,
-    "评分规则": "评估项目立项的必要性和迫切性，是否符合政策导向和实际需求",
-    "评分过程": "Writer需检查项目背景分析、需求调研报告、政策依据等材料的完整性和充分性进行评分"
-  }}
-]
-
-请为{project_name}（{project_type}）设计8-12个指标，确保覆盖四个一级指标维度。
-"""
+        metrics_design_prompt = METRICS_DESIGN_PROMPT.format(
+            project_info=json.dumps(enriched_info, ensure_ascii=False, indent=2),
+            project_name=project_name,
+            project_type=project_type
+        )
         
         try:
-            metrics_result = await self._aask(metrics_design_prompt)
+            metrics_result = await self._aask(metrics_design_prompt, [ARCHITECT_BASE_SYSTEM])
             
             # 从LLM回复中提取JSON内容
             metrics_data = self._extract_json_from_llm_response(metrics_result)
@@ -677,17 +961,45 @@ class DesignReportStructure(Action):
         验证指标数据结构的完整性
         """
         validated_metrics = []
-        required_fields = ['metric_id', 'name', 'category', '一级指标', '二级指标', '三级指标', '分值', '评分规则', '评分过程']
+        # 🔧 修复：支持多种字段名格式，兼容新的指标结构
+        required_fields = ['metric_id', 'name', 'category', '一级指标', '二级指标', '三级指标', '分值']
+        # 可选字段，支持多种格式
+        optional_fields = [
+            ('evaluation_type', '评价类型'),
+            ('evaluation_points', '评价要点'), 
+            ('scoring_method', '评分方法', '评分规则'),
+            ('评分过程', '评分过程')
+        ]
         
         for metric in metrics_data:
+            # 检查必需字段
             if all(field in metric for field in required_fields):
                 # 确保一级指标只能是固定的四个值
                 if metric['一级指标'] in ['决策', '过程', '产出', '效益']:
-                    validated_metrics.append(metric)
+                    # 🔧 标准化字段名，确保兼容性
+                    standardized_metric = metric.copy()
+                    
+                    # 处理评分方法字段的多种格式
+                    if 'scoring_method' not in standardized_metric:
+                        if '评分方法' in standardized_metric:
+                            standardized_metric['scoring_method'] = standardized_metric['评分方法']
+                        elif '评分规则' in standardized_metric:
+                            standardized_metric['scoring_method'] = standardized_metric['评分规则']
+                    
+                    # 确保有评分过程字段
+                    if '评分过程' not in standardized_metric:
+                        if 'evaluation_process' in standardized_metric:
+                            standardized_metric['评分过程'] = standardized_metric['evaluation_process']
+                        else:
+                            standardized_metric['评分过程'] = f"对指标'{metric.get('name', '未知指标')}'进行专业评价"
+                    
+                    validated_metrics.append(standardized_metric)
+                    logger.debug(f"✅ 验证通过指标: {metric.get('name', '未知指标')}")
                 else:
                     logger.warning(f"指标 {metric.get('name', '未知')} 的一级指标不符合要求: {metric.get('一级指标', '')}")
             else:
-                logger.warning(f"指标数据不完整: {metric}")
+                missing_fields = [field for field in required_fields if field not in metric]
+                logger.warning(f"指标数据不完整，缺失字段 {missing_fields}: {metric.get('name', '未知指标')}")
         
         return validated_metrics
     

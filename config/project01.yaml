@@ -1,0 +1,37 @@
+# =============================================================================
+# 项目配置文件 - project01.yaml
+# 项目信息配置化，消除LLM提取的不确定性
+# =============================================================================
+
+# 项目基本信息（对应architect_action.py中的8个字段）
+project_info:
+  project_name: "睢阳区李口镇农村公益事业财政奖补项目"
+  project_type: "财政支出项目"
+  budget_amount: "888,956.76元"
+  implementation_period: "2025年1月-2025年4月"
+  target_beneficiaries: "贾杨楼村、温堂村、贾关庄村、小吴庄村等农村居民"
+  main_objectives:
+    - "改善农村基础设施建设"
+    - "提升村民出行便利性"
+    - "促进农村经济发展"
+    - "美化农村环境"
+  key_activities:
+    - "C30水泥混凝土道路建设"
+    - "村庄绿化工程（栾树、海棠、樱花、红叶李等）"
+    - "基础设施配套完善"
+  performance_focus: "社会效益、经济效益、生态效益"
+
+# 文件路径配置
+file_paths:
+  uploads_dir: "workspace/project01/uploads"
+  documents:
+    - "workspace/project01/uploads/项目移交表.md"
+
+# 工作区配置
+workspace:
+  project_id: "project01"
+  base_path: "workspace/project01"
+  vector_storage_path: "workspace/project01/vector_storage"
+
+# 用户消息配置（用于模拟chainlit输入）
+user_message: "根据上传的[陶丘市睢阳区李口镇人民政府睢阳区李口镇农村公益事业财政奖补项目]相关文档，设计该项目的财政重点绩效评价报告，重点关注绩效指标决策,过程,产出,效益的完整体系设计"

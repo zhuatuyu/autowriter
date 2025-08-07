@@ -1,9 +1,9 @@
 """
 公司服务 - 智能体团队管理
 基于新的SOP和Agent架构
+配置驱动版本 - 移除chainlit依赖，纯终端模式
 """
 import asyncio
-import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
@@ -19,7 +19,6 @@ from backend.roles.architect import Architect
 from backend.roles.project_manager import ProjectManager as PM
 from backend.roles.writer_expert import WriterExpert
 from backend.actions.research_action import Documents, Document
-import chainlit as cl
 
 
 class Company:
@@ -31,13 +30,17 @@ class Company:
         self.teams: Dict[str, Team] = {}
         self.project_repos: Dict[str, ProjectRepo] = {}
 
-    async def process_message(self, project_id: str, message: str, environment: Environment, file_paths: Optional[List[str]] = None) -> str:
+    async def process_message(self, project_config: Dict[str, Any], message: str, environment: Environment, file_paths: Optional[List[str]] = None) -> str:
         """
-        处理用户消息，创建或获取团队，并执行任务
+        🎯 配置驱动的消息处理 - 使用项目配置而不是随机project_id
         """
         try:
+            # 从项目配置获取项目信息
+            project_id = project_config.get('project_id', 'default_project')
+            workspace_config = project_config.get('workspace', {})
+            
             # 获取或创建团队
-            team = await self._get_or_create_team(project_id, environment)
+            team = await self._get_or_create_team(project_id, environment, workspace_config)
             
             # 路由消息到团队
             result = await self._route_message(team, message, project_id, file_paths)
@@ -48,15 +51,20 @@ class Company:
             logger.error(f"处理消息失败: {e}")
             return f"处理失败: {str(e)}"
 
-    async def _get_or_create_team(self, project_id: str, environment: Environment) -> Team:
+    async def _get_or_create_team(self, project_id: str, environment: Environment, workspace_config: Dict[str, Any] = None) -> Team:
         """
-        获取或创建基于新SOP的智能体团队
+        🎯 配置驱动的团队创建 - 使用项目配置中的工作区路径
         """
         if project_id in self.teams:
             return self.teams[project_id]
         
-        # 创建工作空间
-        workspace_path = Path("workspace") / project_id
+        # 🎯 使用配置中的工作区路径
+        if workspace_config and 'base_path' in workspace_config:
+            workspace_path = Path(workspace_config['base_path'])
+        else:
+            # 备用方案
+            workspace_path = Path("workspace") / project_id
+            
         workspace_path.mkdir(parents=True, exist_ok=True)
         
         # 创建uploads目录
@@ -175,7 +183,7 @@ class Company:
 
             # 启动SOP流程
             logger.info(f"🔄 开始SOP流程: {project_id}")
-            await self._run_team_with_frontend_updates(team, project_id)
+            await self._run_team_with_terminal_mode(team, project_id)
             
             return "SOP流程执行完成，报告已生成"
             
@@ -185,9 +193,9 @@ class Company:
             logger.error(f"错误堆栈: {traceback.format_exc()}")
             raise
 
-    async def _run_team_with_frontend_updates(self, team: Team, project_id: str):
+    async def _run_team_with_terminal_mode(self, team: Team, project_id: str):
         """
-        运行团队SOP流程并向前端推送更新
+        🎯 纯终端模式运行团队SOP流程 - 移除chainlit依赖
         """
         try:
             # 验证团队状态
@@ -202,86 +210,16 @@ class Company:
                     raise ValueError(f"角色 {role_name} 缺少 profile 属性")
                 logger.info(f"✅ 角色验证通过: {role_name} - {role.profile}")
             
-            # 启动消息监控
-            monitor_task = asyncio.create_task(self._monitor_team_messages(team))
-            
-            # 启动团队任务 (增加轮次确保所有智能体都能参与，特别是Architect处理时间增长后)
+            # 🎯 纯终端模式 - 直接启动团队任务，无需监控
             logger.info("🔄 启动团队SOP流程...")
-            team_task = asyncio.create_task(team.run(n_round=10))
-            
-            # 等待团队完成
-            await team_task
+            await team.run(n_round=10)
             logger.info("✅ 团队SOP流程执行完成")
-            
-            # 取消监控任务
-            monitor_task.cancel()
             
         except Exception as e:
             logger.error(f"团队SOP流程失败: {e}")
             logger.error(f"错误类型: {type(e)}")
             import traceback
             logger.error(f"错误堆栈: {traceback.format_exc()}")
-            
-            # 确保监控任务被取消
-            if 'monitor_task' in locals():
-                monitor_task.cancel()
             raise
 
-    async def _monitor_team_messages(self, team: Team):
-        """
-        监控团队消息并向前端推送
-        """
-        last_sent_idx = -1
-
-        try:
-            while True:
-                if team.env.history and team.env.history.storage:
-                    current_msg_count = len(team.env.history.storage)
-                    if current_msg_count > last_sent_idx + 1:
-                        new_messages = team.env.history.storage[last_sent_idx + 1:]
-                        for msg in new_messages:
-                            # 添加详细的空值检查
-                            if msg is None:
-                                logger.warning("发现空消息，跳过")
-                                continue
-                            
-                            # 检查消息属性
-                            if not hasattr(msg, 'role'):
-                                logger.warning(f"消息缺少role属性: {type(msg)}")
-                                continue
-                                
-                            if msg.role is None:
-                                logger.warning("消息的role为None")
-                                continue
-                                
-                            if msg.role == "User":
-                                continue
-                            
-                            # 安全获取author信息
-                            try:
-                                author = getattr(msg, 'sent_from', None) or getattr(msg, 'role', 'Unknown')
-                                if author and hasattr(msg, 'content'):
-                                    await self._send_to_frontend(
-                                        message=msg.content or "", 
-                                        author=str(author)
-                                    )
-                            except Exception as msg_error:
-                                logger.error(f"处理消息时出错: {msg_error}, 消息类型: {type(msg)}")
-                                
-                        last_sent_idx = current_msg_count - 1
-
-                await asyncio.sleep(1)
-
-        except asyncio.CancelledError:
-            logger.info("消息监控任务已取消")
-        except Exception as e:
-            logger.error(f"消息监控失败: {e}")
-            import traceback
-            logger.error(f"监控错误堆栈: {traceback.format_exc()}")
-
-    async def _send_to_frontend(self, message: str, author: str):
-        """
-        向前端发送消息
-        """
-        logger.info(f"📤 推送消息到前端 from {author}: {message[:100]}...")
-        await cl.Message(content=message, author=author).send()
+# 🎯 移除所有chainlit相关方法 - 纯终端模式不需要前端推送

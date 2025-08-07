@@ -9,10 +9,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 from metagpt.logs import logger
 from metagpt.rag.engines.simple import SimpleEngine
-from metagpt.rag.factories.embedding import get_rag_embedding
 from metagpt.rag.schema import FAISSRetrieverConfig
 from metagpt.config2 import Config
-from llama_index.llms.openai import OpenAI as LlamaOpenAI
 
 from .global_knowledge import global_knowledge
 
@@ -34,14 +32,26 @@ class HybridSearchService:
         """创建LLM和嵌入模型"""
         config = self._get_config()
         llm_config = config.llm
+        embed_config = config.embedding
         
-        llm = LlamaOpenAI(
+        # 🔧 按照阿里云官方文档使用OpenAI-Like方式 
+        from llama_index.embeddings.dashscope import DashScopeEmbedding
+        from llama_index.llms.openai_like import OpenAILike
+        
+        # 创建LLM - 使用官方推荐的OpenAI-Like方式
+        llm = OpenAILike(
+            model=llm_config.model,  # 从配置文件读取：qwen-max-latest
+            api_base=llm_config.base_url,  # "https://dashscope.aliyuncs.com/compatible-mode/v1"
             api_key=llm_config.api_key,
-            base_url=llm_config.base_url,
-            model="gpt-3.5-turbo"
+            is_chat_model=True
         )
         
-        embed_model = get_rag_embedding(config=config)
+        # 创建Embedding模型 - 使用官方DashScopeEmbedding
+        embed_model = DashScopeEmbedding(
+            model_name=embed_config.model,  # text-embedding-v3
+            api_key=embed_config.api_key,
+            dashscope_api_key=embed_config.api_key  # DashScope专用参数
+        )
         embed_model.embed_batch_size = 8
         
         return llm, embed_model
@@ -254,7 +264,7 @@ class HybridSearchService:
     
     def add_content_to_project(self, content: str, filename: str, project_vector_storage_path: str) -> bool:
         """
-        添加内容到项目知识库
+        添加内容到项目知识库 - 🚀 统一使用MetaGPT原生分块策略
         
         Args:
             content: 文档内容
@@ -265,19 +275,14 @@ class HybridSearchService:
             # 确保目录存在
             Path(project_vector_storage_path).mkdir(parents=True, exist_ok=True)
             
-            # 内容分块处理
-            chunks = self._split_content_to_chunks(content)
-            
-            # 保存分块到文件
-            for i, chunk in enumerate(chunks):
-                chunk_filename = f"{Path(filename).stem}_chunk_{i}.txt"
-                chunk_file_path = Path(project_vector_storage_path) / chunk_filename
-                chunk_file_path.write_text(chunk.strip(), encoding='utf-8')
+            # 🚀 改为保存完整文件，让MetaGPT内部处理分块
+            file_path = Path(project_vector_storage_path) / filename
+            file_path.write_text(content, encoding='utf-8')
             
             # 清除缓存，强制重建索引
             self.invalidate_project_cache(project_vector_storage_path)
             
-            logger.info(f"📄 已添加 {len(chunks)} 个内容块到项目知识库: {filename}")
+            logger.info(f"📄 已添加完整文档到项目知识库: {filename}")
             return True
             
         except Exception as e:
@@ -309,145 +314,8 @@ class HybridSearchService:
             logger.error(f"❌ 批量添加内容失败: {e}")
             return False
     
-    def _split_content_to_chunks(self, content: str, max_chunk_size: int = 2000) -> List[str]:
-        """
-        🚀 智能内容分块逻辑 - 基于语义边界的优化策略
-        参考业界最佳实践：1024 tokens ≈ 2000字符 为最优平衡点
-        """
-        # 🎯 优化1: 提高最小有效chunk大小，避免无意义的小片段
-        min_chunk_size = 200  # 避免产生过小的无意义chunk
-        
-        if len(content) <= max_chunk_size:
-            return [content] if len(content.strip()) >= min_chunk_size else []
-        
-        chunks = []
-        
-        # 🎯 优化2: 优先保护表格完整性
-        if self._contains_table(content):
-            table_chunks = self._handle_table_content(content, max_chunk_size)
-            if table_chunks:
-                return table_chunks
-        
-        # 🎯 优化3: 递归分块策略，保持语义完整性
-        # 分隔符优先级：章节 > 段落 > 句子 > 强制分割
-        separators = [
-            '\n\n## ',  # 章节标题
-            '\n\n# ',   # 主标题  
-            '\n\n',     # 段落分隔
-            '\n',       # 行分隔
-            '。',       # 句子分隔
-            '；',       # 分句
-            '，',       # 短语分隔
-        ]
-        
-        # 递归分块
-        chunks = self._recursive_split(content, max_chunk_size, min_chunk_size, separators)
-        
-        # 🎯 优化4: 添加10%重叠，避免边界信息丢失
-        overlapped_chunks = self._add_overlap(chunks, overlap_ratio=0.1)
-        
-        # 🎯 优化5: 过滤过小的chunks，避免噪声
-        valid_chunks = [chunk for chunk in overlapped_chunks if len(chunk.strip()) >= min_chunk_size]
-        
-        logger.debug(f"📝 智能分块完成: {len(content)} 字符 -> {len(valid_chunks)} 个有效块")
-        return valid_chunks
-    
-    def _contains_table(self, content: str) -> bool:
-        """检测内容是否包含表格"""
-        table_indicators = ['<table>', '<tr>', '<td>', '|---|', '|----']
-        return any(indicator in content for indicator in table_indicators)
-    
-    def _handle_table_content(self, content: str, max_chunk_size: int) -> List[str]:
-        """处理包含表格的内容，保持表格完整性"""
-        # 简单策略：如果整个内容包含表格且不超过最大大小，保持完整
-        if len(content) <= max_chunk_size * 1.5:  # 表格允许稍微超过限制
-            return [content]
-        
-        # 复杂表格：尝试按表格分割
-        table_parts = content.split('<table>')
-        if len(table_parts) > 1:
-            chunks = []
-            current_chunk = table_parts[0]
-            
-            for i, part in enumerate(table_parts[1:], 1):
-                table_content = '<table>' + part
-                if len(current_chunk + table_content) <= max_chunk_size:
-                    current_chunk += table_content
-                else:
-                    if current_chunk.strip():
-                        chunks.append(current_chunk.strip())
-                    current_chunk = table_content
-            
-            if current_chunk.strip():
-                chunks.append(current_chunk.strip())
-            return chunks
-        
-        return []
-    
-    def _recursive_split(self, text: str, max_size: int, min_size: int, separators: List[str], depth: int = 0) -> List[str]:
-        """递归分割策略"""
-        if len(text) <= max_size:
-            return [text] if len(text.strip()) >= min_size else []
-        
-        if depth >= len(separators):
-            # 强制按字符分割
-            return [text[i:i+max_size] for i in range(0, len(text), max_size)]
-        
-        separator = separators[depth]
-        parts = text.split(separator)
-        
-        if len(parts) == 1:
-            # 当前分隔符无效，尝试下一个
-            return self._recursive_split(text, max_size, min_size, separators, depth + 1)
-        
-        chunks = []
-        current_chunk = ""
-        
-        for i, part in enumerate(parts):
-            # 重新添加分隔符
-            if i > 0:
-                part = separator + part
-            
-            if len(current_chunk + part) <= max_size:
-                current_chunk += part
-            else:
-                if current_chunk.strip() and len(current_chunk.strip()) >= min_size:
-                    chunks.append(current_chunk.strip())
-                
-                # 如果单个part还是太大，递归分割
-                if len(part) > max_size:
-                    chunks.extend(self._recursive_split(part, max_size, min_size, separators, depth + 1))
-                    current_chunk = ""
-                else:
-                    current_chunk = part
-        
-        if current_chunk.strip() and len(current_chunk.strip()) >= min_size:
-            chunks.append(current_chunk.strip())
-        
-        return chunks
-    
-    def _add_overlap(self, chunks: List[str], overlap_ratio: float = 0.1) -> List[str]:
-        """添加chunk间重叠，避免边界信息丢失"""
-        if len(chunks) <= 1:
-            return chunks
-        
-        overlapped_chunks = [chunks[0]]
-        
-        for i in range(1, len(chunks)):
-            prev_chunk = chunks[i-1]
-            curr_chunk = chunks[i]
-            
-            # 计算重叠长度
-            overlap_length = int(len(prev_chunk) * overlap_ratio)
-            if overlap_length > 0:
-                # 从前一个chunk末尾取重叠内容
-                overlap_text = prev_chunk[-overlap_length:]
-                overlapped_chunk = overlap_text + "\n\n" + curr_chunk
-                overlapped_chunks.append(overlapped_chunk)
-            else:
-                overlapped_chunks.append(curr_chunk)
-        
-        return overlapped_chunks
+    # 🗑️ 移除复杂的手动分块逻辑，统一使用MetaGPT原生SentenceSplitter
+    # 这样与全局知识库保持一致，简化维护复杂度
     
     def get_project_knowledge_stats(self, project_vector_storage_path: str) -> dict:
         """获取项目知识库统计信息"""

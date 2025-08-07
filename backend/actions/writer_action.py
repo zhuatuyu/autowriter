@@ -167,29 +167,38 @@ class EvaluateMetrics(Action):
     
     async def _retrieve_metric_facts(self, metric_name: str, vector_store_path: str) -> str:
         """
-        🚀 使用统一混合检索接口为指标检索相关事实依据
+        🧠 使用智能检索服务为指标检索相关事实依据
         """
         try:
-            from backend.services.hybrid_search import hybrid_search
+            from backend.services.intelligent_search import intelligent_search
             
-            # 使用统一的混合检索服务
-            results = await hybrid_search.hybrid_search(
-                query=metric_name,
+            # 🧠 构造更智能的查询策略
+            primary_query = f"{metric_name} 的具体数据、完成情况和实施效果"
+            
+            # 使用智能检索，优先使用知识图谱推理
+            search_result = await intelligent_search.intelligent_search(
+                query=primary_query,
                 project_vector_storage_path=vector_store_path,
+                mode="hybrid",  # 自动选择最佳检索方法
                 enable_global=True,
-                global_top_k=2,
-                project_top_k=3
+                max_results=3
             )
             
-            if results:
-                facts = "\n\n".join(results)
-                logger.info(f"🔍 为指标'{metric_name}'检索到 {len(results)} 条事实依据")
+            if search_result.get("results"):
+                facts = "\n\n".join(search_result["results"])
+                
+                # 🧠 添加智能洞察
+                if search_result.get("insights"):
+                    insights_section = "\n\n💡 智能分析:\n" + "\n".join(search_result["insights"])
+                    facts += insights_section
+                
+                logger.info(f"🧠 为指标'{metric_name}'智能检索到事实，模式: {search_result.get('mode_used', 'unknown')}")
                 return facts
             else:
                 return f"未能检索到关于'{metric_name}'的相关事实依据。"
                 
         except Exception as e:
-            logger.error(f"检索指标事实失败: {e}")
+            logger.error(f"智能检索指标事实失败: {e}")
             return f"检索失败，无法获取关于'{metric_name}'的事实依据。"
     
     async def _evaluate_element_compliance(self, facts: str, evaluation_points: list, scoring_method: str) -> tuple:
@@ -555,29 +564,43 @@ class WriteSection(Action):
         return relevant_metrics
     
     async def _retrieve_factual_basis(self, task: Task, vector_store_path: str) -> str:
-        """🚀 使用统一混合检索接口检索相关的事实依据"""
+        """🧠 使用智能检索服务检索相关的事实依据"""
         try:
-            from backend.services.hybrid_search import hybrid_search
+            from backend.services.intelligent_search import intelligent_search
             
-            # 构建检索查询 - 结合章节标题和写作要求
+            # 🧠 构建更智能的检索查询 - 结合章节标题和写作要求
             search_query = f"{task.section_title} {task.instruction[:200]}"
             
-            # 使用统一的混合检索服务
-            results = await hybrid_search.hybrid_search(
+            # 🧠 根据章节类型选择最佳检索模式
+            if any(keyword in task.section_title for keyword in ["概述", "总结", "分析"]):
+                mode = "hybrid"  # 综合分析类章节使用混合模式
+            elif any(keyword in task.section_title for keyword in ["问题", "建议", "改进"]):
+                mode = "knowledge_graph"  # 问题分析和建议类章节使用知识图谱推理
+            else:
+                mode = "flare"  # 其他章节使用FLARE主动检索
+            
+            # 使用智能检索服务
+            search_result = await intelligent_search.intelligent_search(
                 query=search_query,
                 project_vector_storage_path=vector_store_path,
+                mode=mode,
                 enable_global=True,
-                global_top_k=2,
-                project_top_k=4
+                max_results=6
             )
             
             # 提取检索到的内容
-            if results:
+            if search_result.get("results"):
+                results = search_result["results"]
                 factual_basis = "\n\n".join([
-                    f"**相关资料{i+1}**: {result}" 
+                    f"**🧠 智能检索资料{i+1}**: {result}" 
                     for i, result in enumerate(results[:6])  # 取前6个最相关的结果
                 ])
-                logger.info(f"🔍 成功检索到 {len(results)} 条相关信息用于章节: {task.section_title}")
+                
+                # 🧠 添加智能洞察
+                if search_result.get("insights"):
+                    factual_basis += "\n\n**💡 智能分析洞察**:\n" + "\n".join(search_result["insights"])
+                
+                logger.info(f"🧠 智能检索到 {len(results)} 条相关信息用于章节: {task.section_title}，使用模式: {search_result.get('mode_used', mode)}")
                 return factual_basis
             else:
                 logger.warning(f"未检索到结果: {task.section_title}")

@@ -10,8 +10,15 @@ embedding:
   api_type: "openai"  # 兼容OpenAI API格式
   base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
   api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
-  model: "text-embedding-v4"  # 阿里云官方模型名称
+  model: "text-embedding-v3"  # 阿里云官方模型名称，v3更稳定
   dimensions: 1024  # 输出向量维度
+
+# 知识图谱构建模型 - 快速低成本模型
+knowledge_graph:
+  api_type: "openai"  # 兼容OpenAI API格式
+  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_key: "sk-e55893a30fad4a2a9e43f20b8eb44efc"
+  model: "qwen-flash"  # 快速低成本的图谱构建专用模型
 
 # 阿里云OpenSearch搜索引擎配置
 search:

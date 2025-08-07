@@ -1,17 +1,14 @@
-# 🎯 欢迎使用 AutoWriter
+# Welcome to Chainlit! 🚀🤖
 
-## 功能介绍
-- **📁 项目管理**: 创建和管理多个写作项目
-- **🤖 智能对话**: 与AI助手进行自然语言交互
-- **📝 文档生成**: 自动生成各类技术文档
+Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
 
-## 快速开始
+## Useful Links 🔗
 
-直接点击下面的按钮开始：
+- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
+- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
 
-[创建新项目](/create_project)  [列出所有项目](/list_projects)
+We can't wait to see what you create with Chainlit! Happy coding! 💻😊
 
-或者直接告诉我你想要创建什么项目，我会立即帮你开始工作！
+## Welcome screen
 
----
-*多智能体会自动协作完成任务，需要时会主动询问你的意见*
+To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.

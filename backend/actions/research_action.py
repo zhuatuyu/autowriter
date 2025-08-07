@@ -222,15 +222,20 @@ class ConductComprehensiveResearch(Action):
                 topic, Documents(), project_repo, online_content=online_research_content
             )
 
-        # 4. 整合内容并生成研究简报
+        # 4. 🧠 智能检索增强内容整合
         combined_content = online_research_content
         if local_docs and local_docs.docs:
             local_docs_content = "\n\n--- 本地知识库 ---\n"
             for doc in local_docs.docs:
                 local_docs_content += f"### 文档: {doc.filename}\n{doc.content}\n\n"
             combined_content += local_docs_content
+        
+        # 🧠 使用智能检索增强研究简报生成
+        enhanced_content = await self._enhance_research_with_intelligent_search(
+            topic, combined_content, vector_store_path
+        )
 
-        prompt = GENERATE_RESEARCH_BRIEF_PROMPT.format(content=combined_content, topic=topic)
+        prompt = GENERATE_RESEARCH_BRIEF_PROMPT.format(content=enhanced_content, topic=topic)
         brief = await self._aask(prompt, [COMPREHENSIVE_RESEARCH_BASE_SYSTEM])
         
         logger.info(f"研究简报生成完毕。")
@@ -355,6 +360,55 @@ class ConductComprehensiveResearch(Action):
             logger.error(f"❌ 获取项目内容块失败: {e}")
             return []
     
+    async def _enhance_research_with_intelligent_search(
+        self, 
+        topic: str, 
+        combined_content: str, 
+        vector_store_path: str
+    ) -> str:
+        """
+        🧠 使用智能检索增强研究内容
+        """
+        try:
+            from backend.services.intelligent_search import intelligent_search
+            
+            # 🧠 针对研究简报生成的专门查询
+            enhancement_queries = [
+                f"关于{topic}的最佳实践案例和成功经验",
+                f"{topic}项目的常见问题和风险因素",
+                f"{topic}的绩效评价指标和评价方法",
+                f"{topic}相关的政策法规和标准规范"
+            ]
+            
+            enhanced_sections = []
+            
+            for query in enhancement_queries:
+                logger.info(f"🧠 智能检索增强: {query}")
+                search_result = await intelligent_search.intelligent_search(
+                    query=query,
+                    project_vector_storage_path=vector_store_path,
+                    mode="knowledge_graph",  # 优先使用知识图谱推理
+                    enable_global=True,
+                    max_results=2
+                )
+                
+                if search_result.get("results"):
+                    enhanced_sections.append(f"### 🧠 智能检索: {query}\n")
+                    enhanced_sections.extend(search_result["results"])
+                    enhanced_sections.append("\n")
+            
+            if enhanced_sections:
+                enhanced_content = combined_content + "\n\n--- 🧠 智能检索增强内容 ---\n" + "\n".join(enhanced_sections)
+                logger.info(f"✅ 智能检索增强完成，新增 {len(enhanced_sections)} 个内容段")
+                return enhanced_content
+            else:
+                logger.info("ℹ️ 智能检索未发现额外内容")
+                return combined_content
+                
+        except Exception as e:
+            logger.warning(f"⚠️ 智能检索增强失败: {e}")
+            return combined_content
+    
     async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, project_vector_path: str = "") -> str:
         """执行在线研究"""
         if not self.search_engine:
@@ -389,23 +443,31 @@ class ConductComprehensiveResearch(Action):
                 logger.error(f"搜索关键词失败 {kw}: {e}")
                 search_results.append([])  # 添加空结果保持索引一致
         
-        # RAG增强：使用统一混合检索查询项目知识库
+        # 🧠 智能检索增强：使用智能检索服务查询项目知识库
         rag_results_str = ""
         if project_vector_path:
             try:
-                from backend.services.hybrid_search import hybrid_search
-                logger.info("...同时查询项目向量知识库...")
-                rag_results = await hybrid_search.hybrid_search(
+                from backend.services.intelligent_search import intelligent_search
+                logger.info("...🧠 启动智能检索查询项目知识库...")
+                
+                # 使用混合智能检索
+                search_result = await intelligent_search.intelligent_search(
                     query=" ".join(keywords),
                     project_vector_storage_path=project_vector_path,
+                    mode="hybrid",  # 使用混合智能检索
                     enable_global=True,
-                    global_top_k=1,
-                    project_top_k=2
+                    max_results=3
                 )
-                if rag_results:
-                    rag_results_str = "\n\n### 项目知识库相关信息\n" + "\n".join(rag_results)
+                
+                if search_result.get("results"):
+                    rag_results_str = "\n\n### 🧠 智能检索相关信息\n" + "\n".join(search_result["results"])
+                    
+                    # 添加智能洞察
+                    if search_result.get("insights"):
+                        rag_results_str += "\n\n### 💡 智能分析洞察\n" + "\n".join(search_result["insights"])
+                        
             except Exception as e:
-                logger.warning(f"项目知识库查询失败: {e}")
+                logger.warning(f"智能检索查询失败: {e}")
         
         search_results_str = "\n".join([f"#### 关键词: {kw}\n{res}\n" for kw, res in zip(keywords, search_results)])
         

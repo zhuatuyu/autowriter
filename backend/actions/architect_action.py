@@ -474,26 +474,36 @@ class DesignReportStructure(Action):
     
     async def _search_chunks(self, query: str) -> List[str]:
         """
-        🚀 使用统一混合检索服务
+        🧠 使用智能检索服务进行增强检索
         """
         try:
-            from backend.services.hybrid_search import hybrid_search
+            from backend.services.intelligent_search import intelligent_search
             
-            # 使用混合检索服务
+            # 🧠 使用智能检索服务
             if self._research_data and hasattr(self._research_data, 'vector_store_path'):
-                results = await hybrid_search.hybrid_search(
+                search_result = await intelligent_search.intelligent_search(
                     query=query,
                     project_vector_storage_path=self._research_data.vector_store_path,
-                    enable_global=True,  # 启用全局知识库
-                    global_top_k=2,      # 全局知识库返回2条
-                    project_top_k=3      # 项目知识库返回3条
+                    mode="hybrid",  # 使用混合智能检索，自动选择最佳方法
+                    enable_global=True,
+                    max_results=5
                 )
                 
-                logger.debug(f"🔍 混合检索完成，查询: '{query}'，找到 {len(results) if results else 0} 条相关内容")
-                return results if results else []
+                results = search_result.get("results", [])
+                
+                # 🧠 添加智能分析洞察到结果中
+                if search_result.get("insights"):
+                    insights_text = "\n💡 智能分析洞察:\n" + "\n".join(search_result["insights"])
+                    if results:
+                        results[0] = results[0] + insights_text
+                    else:
+                        results = [insights_text]
+                
+                logger.debug(f"🧠 智能检索完成，查询: '{query}'，模式: {search_result.get('mode_used', 'unknown')}，找到 {len(results)} 条相关内容")
+                return results
                     
         except Exception as e:
-            logger.error(f"❌ 混合检索失败: {e}")
+            logger.error(f"❌ 智能检索失败: {e}")
             return []
     
     async def _generate_customized_template(self, enriched_info: dict) -> Tuple[ReportStructure, MetricAnalysisTable]:

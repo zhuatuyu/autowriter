@@ -168,7 +168,8 @@ class HybridSearchService:
         global_results: List[str], 
         project_results: List[str],
         global_weight: float = 0.3,
-        project_weight: float = 0.7
+        project_weight: float = 0.7,
+        limit: int = 6,
     ) -> List[str]:
         """合并检索结果，项目知识库权重更高"""
         
@@ -192,7 +193,7 @@ class HybridSearchService:
                 seen.add(result)
                 unique_results.append(result)
         
-        return unique_results[:6]  # 限制总结果数
+        return unique_results[:limit]  # 限制总结果数（可配置）
     
     async def hybrid_search(
         self, 
@@ -233,8 +234,8 @@ class HybridSearchService:
             
             logger.info(f"🔍 混合检索完成 - 项目结果: {len(project_results)}, 全局结果: {len(global_results)}")
             
-            # 合并结果
-            return self._merge_search_results(global_results, project_results)
+            # 合并结果（按 top_k 之和限制总结果数）
+            return self._merge_search_results(global_results, project_results, limit=max(1, int(global_top_k) + int(project_top_k)))
             
         except Exception as e:
             logger.error(f"❌ 混合检索失败: {e}")
@@ -262,7 +263,7 @@ class HybridSearchService:
         logger.info(f"📁 项目知识库已创建: {project_vector_path}")
         return str(project_vector_path)
     
-    def add_content_to_project(self, content: str, filename: str, project_vector_storage_path: str) -> bool:
+    def add_content_to_project(self, content: str, filename: str, project_vector_storage_path: str, invalidate_cache: bool = True) -> bool:
         """
         添加内容到项目知识库 - 🚀 统一使用MetaGPT原生分块策略
         
@@ -279,8 +280,9 @@ class HybridSearchService:
             file_path = Path(project_vector_storage_path) / filename
             file_path.write_text(content, encoding='utf-8')
             
-            # 清除缓存，强制重建索引
-            self.invalidate_project_cache(project_vector_storage_path)
+            # 清除缓存，强制重建索引（可配置）
+            if invalidate_cache:
+                self.invalidate_project_cache(project_vector_storage_path)
             
             logger.info(f"📄 已添加完整文档到项目知识库: {filename}")
             return True
@@ -298,17 +300,42 @@ class HybridSearchService:
             project_vector_storage_path: 项目向量存储路径
         """
         try:
-            success_count = 0
-            for item in contents:
-                if self.add_content_to_project(
-                    content=item.get("content", ""),
-                    filename=item.get("filename", f"content_{success_count}.txt"),
-                    project_vector_storage_path=project_vector_storage_path
-                ):
-                    success_count += 1
-            
-            logger.info(f"📦 批量添加完成: {success_count}/{len(contents)} 个内容成功添加")
-            return success_count == len(contents)
+            # 仅对“新增或内容变更”的文件进行写入，并在最后统一失效缓存
+            Path(project_vector_storage_path).mkdir(parents=True, exist_ok=True)
+
+            added_or_updated = 0
+            skipped_unchanged = 0
+
+            for idx, item in enumerate(contents):
+                new_content = item.get("content", "")
+                filename = item.get("filename", f"content_{idx}.txt")
+                file_path = Path(project_vector_storage_path) / filename
+
+                is_unchanged = False
+                if file_path.exists():
+                    try:
+                        old_content = file_path.read_text(encoding='utf-8')
+                        is_unchanged = (old_content == new_content)
+                    except Exception:
+                        # 读取失败则视为需要更新
+                        is_unchanged = False
+
+                if is_unchanged:
+                    skipped_unchanged += 1
+                    continue
+
+                # 新增或变更：写入但不立即失效缓存
+                file_path.write_text(new_content, encoding='utf-8')
+                added_or_updated += 1
+
+            # 仅当有变更时，统一失效缓存
+            if added_or_updated > 0:
+                self.invalidate_project_cache(project_vector_storage_path)
+
+            logger.info(
+                f"📦 批量同步完成: 新增/更新 {added_or_updated} 个，跳过未变化 {skipped_unchanged} 个，总计 {len(contents)} 个"
+            )
+            return True
             
         except Exception as e:
             logger.error(f"❌ 批量添加内容失败: {e}")

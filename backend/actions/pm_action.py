@@ -15,7 +15,6 @@ class Task(BaseModel):
     task_id: int
     section_title: str
     instruction: str  # 写作指令，即原description_prompt
-    metric_ids: List[str] = Field(default_factory=list)  # 关联的指标ID
 
 
 class TaskPlan(BaseModel):
@@ -41,7 +40,6 @@ class CreateTaskPlan(Action):
                 task_id=i,
                 section_title=section.section_title,
                 instruction=section.description_prompt,
-                metric_ids=section.metric_ids
             )
             tasks.append(task)
             logger.info(f"创建任务 {i}: {section.section_title}")

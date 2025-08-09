@@ -63,6 +63,22 @@ class PerformanceConfig:
         """获取研究方向配置"""
         cls._load_config()
         return cls._config.get('research_directions', {})
+
+    @classmethod
+    def get_research_settings(cls) -> Dict[str, Any]:
+        """获取研究流程参数配置"""
+        cls._load_config()
+        return cls._config.get('research_settings', {})
+
+    @classmethod
+    def get_research_decomposition_nums(cls) -> int:
+        settings = cls.get_research_settings()
+        return int(settings.get('decomposition_nums', 3))
+
+    @classmethod
+    def get_research_url_per_query(cls) -> int:
+        settings = cls.get_research_settings()
+        return int(settings.get('url_per_query', 3))
     
     @classmethod
     def get_enhancement_queries(cls) -> List[str]:
@@ -111,18 +127,34 @@ class PerformanceConfig:
         """获取提示词配置"""
         cls._load_config()
         return cls._config.get('prompts', {})
+
+    @classmethod
+    def get_research_prompts(cls) -> Dict[str, str]:
+        """获取研究类提示词配置"""
+        prompts = cls.get_prompts()
+        return prompts.get('research', {})
+
+    @classmethod
+    def get_writer_prompts(cls) -> Dict[str, str]:
+        """获取写作类提示词配置"""
+        prompts = cls.get_prompts()
+        return prompts.get('writer', {})
+
+    @classmethod
+    def get_writer_evaluation_prompt_template(cls) -> str:
+        """获取写作类：通用指标评价提示词模板"""
+        return cls.get_writer_prompts().get('evaluation_prompt_template', '')
+
+    @classmethod
+    def get_metric_prompt_spec(cls) -> dict:
+        """获取指标级提示词组合规范"""
+        return cls.get_writer_prompts().get('metric_prompt_spec', {})
     
     @classmethod
     def get_architect_base_system(cls) -> str:
         """获取架构师基础系统提示词"""
         prompts = cls.get_prompts()
         return prompts.get('architect_base_system', '')
-    
-    @classmethod
-    def get_project_info_extraction_prompt(cls) -> str:
-        """获取项目信息提取提示词"""
-        prompts = cls.get_prompts()
-        return prompts.get('project_info_extraction', '')
     
     @classmethod
     def get_evaluation_level(cls, total_score: float) -> str:
@@ -174,6 +206,17 @@ class PerformanceConfig:
         """获取指标体系设计提示词"""
         prompts = cls.get_prompts()
         return prompts.get('metrics_design', '')
+
+    # ===== 研究类提示词 =====
+    @classmethod
+    def get_research_prompt(cls, key: str) -> str:
+        research_prompts = cls.get_research_prompts()
+        return research_prompts.get(key, '')
+
+    @classmethod
+    def get_writer_prompt(cls, key: str) -> str:
+        writer_prompts = cls.get_writer_prompts()
+        return writer_prompts.get(key, '')
     
     @classmethod
     def get_fallback_keywords(cls) -> List[Dict[str, Any]]:

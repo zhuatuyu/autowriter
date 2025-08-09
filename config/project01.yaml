@@ -26,6 +26,16 @@ file_paths:
   uploads_dir: "workspace/project01/uploads"
   documents:
     - "workspace/project01/uploads/项目移交表.md"
+    - "workspace/project01/uploads/三重一大事项报告单，财政审核表.md"
+    - "workspace/project01/uploads/财政决算评审.md"
+    - "workspace/project01/uploads/财政预算评审.md"
+    - "workspace/project01/uploads/李口镇4个村申请.md"
+    - "workspace/project01/uploads/项目资金支付凭证.md"
+    - "workspace/project01/uploads/项目造价表.md"
+    - "workspace/project01/uploads/项目竣工资料.md"
+    - "workspace/project01/uploads/项目建立资料监理日志.md"
+    - "workspace/project01/uploads/中标合同验收.md"
+
 
 # 工作区配置
 workspace:

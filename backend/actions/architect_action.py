@@ -12,13 +12,12 @@ from pydantic import BaseModel, Field
 from metagpt.actions import Action
 from metagpt.logs import logger
 from backend.actions.research_action import ResearchData
+from backend.tools.json_utils import extract_json_from_llm_response
 from backend.config.performance_constants import (
     ENV_ARCHITECT_BASE_SYSTEM,
     ENV_RAG_KEYWORDS_GENERATION_PROMPT,
     ENV_SECTION_PROMPT_GENERATION_TEMPLATE,
     ENV_METRICS_DESIGN_PROMPT,
-    ENV_EVALUATION_TYPES,
-    ENV_SECTION_CONFIGURATIONS,
     ENV_REPORT_SECTIONS,
     ENV_GET_SECTION_CONFIG,
     ENV_GET_SECTION_KEY_BY_TITLE,
@@ -34,7 +33,6 @@ from backend.config.performance_constants import (
 class Section(BaseModel):
     """报告章节的结构化模型"""
     section_title: str = Field(..., description="章节标题")
-    metric_ids: List[str] = Field(default_factory=list, description="本章节关联的指标ID列表")
     description_prompt: str = Field(..., description="指导本章节写作的核心要点或问题")
 
 
@@ -86,7 +84,7 @@ class DesignReportStructure(Action):
         # 🎯 直接使用配置化的项目信息，无需LLM提取
         if project_info:
             self._project_info = project_info
-            logger.info(f"📋 使用配置化项目信息: {project_info.get('project_name', '未知项目')}")
+            logger.info(f"📋 使用配置化项目信息: {project_info['project_name']}")
         else:
             # 如果没有传入项目信息，尝试从类属性获取
             if not self._project_info:
@@ -108,59 +106,16 @@ class DesignReportStructure(Action):
     
     # 🎯 移除LLM项目信息提取逻辑 - 直接使用配置化项目信息
     
-    def _extract_json_from_llm_response(self, response: str) -> dict:
-        """
-        从LLM回复中提取JSON内容，处理markdown格式和额外说明
-        """
-        try:
-            # 方法1：尝试直接解析（如果是纯JSON）
-            return json.loads(response)
-        except:
-            pass
-        
-        try:
-            # 方法2：提取```json代码块中的内容
-            import re
-            json_pattern = r'```json\s*(.*?)\s*```'
-            match = re.search(json_pattern, response, re.DOTALL)
-            if match:
-                json_str = match.group(1).strip()
-                return json.loads(json_str)
-        except:
-            pass
-        
-        try:
-            # 方法3：查找大括号包围的JSON内容
-            start_idx = response.find('{')
-            if start_idx != -1:
-                # 找到第一个{，然后找到匹配的}
-                brace_count = 0
-                end_idx = start_idx
-                for i, char in enumerate(response[start_idx:], start_idx):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            end_idx = i
-                            break
-                
-                if brace_count == 0:
-                    json_str = response[start_idx:end_idx+1]
-                    return json.loads(json_str)
-        except:
-            pass
-        
-        # 如果所有方法都失败，抛出异常
-        raise ValueError(f"无法从LLM回复中提取有效JSON: {response[:200]}...")
-    
     async def _enrich_with_rag(self, project_info: dict) -> dict:
         """
         步骤二：通过RAG检索丰富项目信息 - 动态生成检索关键词
         """
-        if not self._research_data or not self._research_data.content_chunks:
-            logger.error("❌ 向量知识库不可用！无法进行RAG增强")
-            raise ValueError("向量知识库不可用，无法进行RAG增强。请确保ResearchData包含有效的content_chunks")
+        if not self._research_data or not getattr(self._research_data, 'vector_store_path', ''):
+            logger.warning("⚠️ 未提供项目向量库路径，跳过RAG增强，直接使用研究简报进行结构设计。")
+            # 直接返回原始项目信息作为富化结果的基础
+            enriched_info = project_info.copy()
+            enriched_info["rag_evidence"] = {}
+            return enriched_info
         
         # 动态生成检索关键词
         search_keywords = await self._generate_rag_search_keywords(project_info)
@@ -202,7 +157,7 @@ class DesignReportStructure(Action):
         """
         动态生成RAG检索关键词（类似PM的关键词生成逻辑）
         """
-        project_name = project_info.get('project_name', '项目')
+        project_name = project_info['project_name']
         
         keyword_generation_prompt = ENV_RAG_KEYWORDS_GENERATION_PROMPT.format(
             project_info=json.dumps(project_info, ensure_ascii=False, indent=2),
@@ -212,8 +167,8 @@ class DesignReportStructure(Action):
         try:
             keywords_result = await self._aask(keyword_generation_prompt)
             
-            # 使用同样的JSON提取逻辑
-            search_keywords = self._extract_json_from_llm_response(keywords_result)
+            # 使用通用JSON提取工具
+            search_keywords = extract_json_from_llm_response(keywords_result)
             
             logger.info(f"🔍 动态生成了 {len(search_keywords)} 个关键词组")
             return search_keywords
@@ -274,12 +229,11 @@ class DesignReportStructure(Action):
         for section_data in customized_sections:
             section = Section(
                 section_title=section_data["title"],
-                metric_ids=section_data.get("metric_ids", []),
                 description_prompt=section_data["description_prompt"]
             )
             sections.append(section)
         
-        project_name = enriched_info.get('project_name', '项目')
+        project_name = enriched_info['project_name']
         report_structure = ReportStructure(
             title=f"{project_name}绩效评价报告",
             sections=sections
@@ -299,8 +253,7 @@ class DesignReportStructure(Action):
             
             customized_section = {
                 "title": section["title"],
-                "description_prompt": customized_prompt,
-                "metric_ids": []  # 🎯 章节不与特定指标关联，由Writer根据实际情况处理
+                "description_prompt": customized_prompt
             }
                 
             customized_sections.append(customized_section)
@@ -313,7 +266,7 @@ class DesignReportStructure(Action):
         """
         base_prompt = section["prompt_template"]
         # 🎯 使用配置化的项目名称
-        project_name = enriched_info.get('project_name', '项目')
+        project_name = enriched_info['project_name']
         section_title = section["title"]
         
         # 根据章节特点生成具体的RAG检索指导
@@ -350,12 +303,9 @@ class DesignReportStructure(Action):
                     evidence_summary = self._get_evidence_summary(rag_evidence, category)
                     instructions = instructions.replace(placeholder, evidence_summary)
         else:
-            # 通用指导作为备用
-            instructions = """
-**通用检索指导**
-   - 优先检索：项目相关的具体数据、政策文件、实施效果
-   - 重点关注：数量化指标、时间节点、责任主体、具体措施
-"""
+            # 通用指导作为备用：改为从配置general章节读取
+            general_cfg = ENV_GET_SECTION_CONFIG('general') or {}
+            instructions = general_cfg.get('rag_instructions', '')
         
         return instructions
 
@@ -391,22 +341,31 @@ class DesignReportStructure(Action):
         一级指标固定为：决策、过程、产出、效益
         二级、三级指标根据项目特点由LLM动态生成
         """
-        project_name = enriched_info.get('project_name', '项目')
-        project_type = enriched_info.get('project_type', '财政支出项目')
         
         # 构造指标设计prompt
         metrics_design_prompt = ENV_METRICS_DESIGN_PROMPT.format(
             project_info=json.dumps(enriched_info, ensure_ascii=False, indent=2),
-            project_name=project_name,
-            project_type=project_type
+            project_name=enriched_info['project_name'],
+            project_type=enriched_info['project_type']
         )
         
         try:
             metrics_result = await self._aask(metrics_design_prompt, [ENV_ARCHITECT_BASE_SYSTEM])
-            
-            # 从LLM回复中提取JSON内容
-            metrics_data = self._extract_json_from_llm_response(metrics_result)
-            
+
+            # 从LLM回复中提取JSON内容（通用工具）
+            raw = extract_json_from_llm_response(metrics_result)
+
+            # 统一依赖工具返回；此处仅作最终兜底
+            if isinstance(raw, list):
+                metrics_data = raw
+            elif isinstance(raw, dict):
+                metrics_data = [raw]
+            else:
+                raise ValueError("LLM返回的指标数据不是可解析的列表/对象")
+
+            # 仅保留字典项，避免字符串等异常元素导致后续处理报错
+            metrics_data = [m for m in metrics_data if isinstance(m, dict)]
+
             # 验证数据完整性和一级指标分布
             validated_metrics = self._validate_metrics_structure(metrics_data)
             
@@ -435,13 +394,7 @@ class DesignReportStructure(Action):
         validated_metrics = []
         # 🔧 修复：支持多种字段名格式，兼容新的指标结构
         required_fields = ['metric_id', 'name', 'category', '一级指标', '二级指标', '三级指标', '分值']
-        # 可选字段，支持多种格式
-        optional_fields = [
-            ('evaluation_type', '评价类型'),
-            ('evaluation_points', '评价要点'), 
-            ('scoring_method', '评分方法', '评分规则'),
-            ('评分过程', '评分过程')
-        ]
+        # 可选字段（说明性注释，已在校验逻辑中内联处理多种命名，不再单独使用列表）
         
         for metric in metrics_data:
             # 检查必需字段

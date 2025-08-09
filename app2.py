@@ -11,9 +11,16 @@ import asyncio
 import argparse
 import yaml
 import shutil
+import sys
 from pathlib import Path
 from typing import Dict, List
 import uuid
+
+# 优先将本仓库自带的MetaGPT备份路径加入sys.path，避免环境未安装导致的导入失败
+_ROOT = Path(__file__).resolve().parent
+_VENDORED = _ROOT / "example" / "MetaGPT_bak"
+if (_VENDORED / "metagpt").exists():
+    sys.path.insert(0, str(_VENDORED))
 
 # 导入真正的后端服务
 from backend.services.company import Company
@@ -152,12 +159,12 @@ class App2Runner:
         print("\n" + "="*80)
         print("📋 项目配置信息:")
         print("="*80)
-        print(f"项目名称: {project_info.get('project_name', '未知')}")
-        print(f"项目类型: {project_info.get('project_type', '未知')}")
-        print(f"预算金额: {project_info.get('budget_amount', '未知')}")
-        print(f"实施周期: {project_info.get('implementation_period', '未知')}")
-        print(f"受益对象: {project_info.get('target_beneficiaries', '未知')}")
-        print(f"主要目标: {', '.join(project_info.get('main_objectives', []))}")
+        print(f"项目名称: {project_info['project_name']}")
+        print(f"项目类型: {project_info['project_type']}")
+        print(f"预算金额: {project_info['budget_amount']}")
+        print(f"实施周期: {project_info['implementation_period']}")
+        print(f"受益对象: {project_info['target_beneficiaries']}")
+        print(f"主要目标: {', '.join(project_info['main_objectives'])}")
         print("="*80)
 
 async def main():

@@ -1,6 +1,6 @@
 """
 🧠 智能检索统一接口
-统一管理向量检索、知识图谱查询和FLARE主动检索
+统一管理向量检索、知识图谱查询和混合智能检索
 为所有action提供最智能的检索能力
 """
 
@@ -8,6 +8,12 @@ from typing import List, Dict, Optional, Literal
 from metagpt.logs import logger
 from .hybrid_search import hybrid_search
 from .knowledge_graph import performance_kg
+from backend.config.performance_constants import (
+    ENV_QUERY_INTENT_MAPPING,
+    ENV_SEARCH_MODE_WEIGHTS,
+    ENV_INTELLIGENT_TOPK,
+)
+from backend.config.performance_constants import ENV_KG_MAX_KEYWORDS
 
 
 
@@ -28,15 +34,14 @@ class IntelligentSearchService:
         self._search_modes = {
             "vector": "向量检索",
             "knowledge_graph": "知识图谱推理",
-            "flare": "FLARE主动检索",
-            "hybrid": "混合智能检索"
+            "hybrid": "混合智能检索",
         }
     
     async def intelligent_search(
         self,
         query: str,
         project_vector_storage_path: str = "",
-        mode: Literal["vector", "knowledge_graph", "flare", "hybrid"] = "hybrid",
+        mode: Literal["vector", "knowledge_graph", "hybrid"] = "hybrid",
         enable_global: bool = True,
         max_results: int = 5
     ) -> Dict[str, any]:
@@ -60,7 +65,6 @@ class IntelligentSearchService:
                 return await self._vector_search(query, project_vector_storage_path, enable_global, max_results)
             elif mode == "knowledge_graph":
                 return await self._knowledge_graph_search(query, project_vector_storage_path, max_results)
-
             elif mode == "hybrid":
                 return await self._hybrid_intelligent_search(query, project_vector_storage_path, enable_global, max_results)
             else:
@@ -115,8 +119,10 @@ class IntelligentSearchService:
             kg_result = ""
             if project_path:
                 try:
+                    # 依据配置限制关键词数量：粗粒度按空白/标点分词截取
+                    limited_query = self._limit_keywords_in_query(query, ENV_KG_MAX_KEYWORDS)
                     kg_result = await performance_kg.query_knowledge_graph(
-                        query=query,
+                        query=limited_query,
                         mode="keyword",  # 修复：使用支持的模式
                         max_knowledge_sequence=max_results
                     )
@@ -163,11 +169,31 @@ class IntelligentSearchService:
         
         tasks = []
         
-        # 向量检索（基础）
-        tasks.append(self._vector_search(query, project_path, enable_global, max_results))
-        
-        # 根据查询意图选择其他方法
-        if search_strategy["use_kg"]:
+        # 根据权重与意图选择方法
+        vector_w = float(ENV_SEARCH_MODE_WEIGHTS.get("vector", 0))
+        kg_w = float(ENV_SEARCH_MODE_WEIGHTS.get("knowledge_graph", 0))
+
+        # 读取可配置的top_k（提供默认值）
+        try:
+            global_top_k = int(ENV_INTELLIGENT_TOPK.get("global_top_k", max_results // 2 or 2))
+            project_top_k = int(ENV_INTELLIGENT_TOPK.get("project_top_k", max_results - global_top_k or 4))
+        except Exception:
+            global_top_k, project_top_k = max_results // 2 or 2, max_results - (max_results // 2 or 2)
+
+        if vector_w > 0:
+            # 在向量检索内部（hybrid_search）按 top_k 精细化控制项目/全局召回
+            from .hybrid_search import hybrid_search as _hybrid
+            async def _vector_adapter():
+                results = await _hybrid.hybrid_search(
+                    query=query,
+                    project_vector_storage_path=project_path,
+                    enable_global=enable_global,
+                    global_top_k=global_top_k,
+                    project_top_k=project_top_k,
+                )
+                return {"results": results, "mode_used": "vector", "insights": [f"📊 Vector召回: 项目{project_top_k}, 全局{global_top_k}"]}
+            tasks.append(_vector_adapter())
+        if kg_w > 0 and search_strategy["use_kg"]:
             tasks.append(self._knowledge_graph_search(query, project_path, max_results))
         
 
@@ -181,37 +207,35 @@ class IntelligentSearchService:
         return hybrid_result
     
     async def _analyze_query_intent(self, query: str) -> Dict[str, bool]:
-        """🧠 查询意图分析，决定使用哪些检索方法"""
-        strategy = {
-            "use_kg": False,
-            "use_flare": False,
-            "query_type": "general"
-        }
-        
-        # 关系推理查询 - 适合知识图谱
-        if any(keyword in query for keyword in [
-            "关系", "联系", "影响", "导致", "原因", "因素",
-            "如何", "为什么", "什么是", "类似", "相关的"
-        ]):
-            strategy["use_kg"] = True
-            strategy["query_type"] = "reasoning"
-        
-        # 复杂探索查询 - 适合FLARE
-        if any(keyword in query for keyword in [
-            "深入", "详细", "全面", "分析", "研究", "探讨", "综合"
-        ]) or len(query) > 20:
-            strategy["use_flare"] = True
-            strategy["query_type"] = "exploration"
-        
-        # 绩效评价专业查询 - 知识图谱优先
-        if any(keyword in query for keyword in [
-            "绩效", "评价", "指标", "体系", "决策", "过程", "产出", "效益"
-        ]):
-            strategy["use_kg"] = True
-            strategy["query_type"] = "performance"
-        
-        logger.debug(f"🧠 查询意图分析: {strategy}")
+        """🧠 查询意图分析（配置驱动：ENV_QUERY_INTENT_MAPPING）"""
+        strategy: Dict[str, bool | str] = {"use_kg": False, "query_type": "general"}
+        mapping: Dict[str, List[str]] = ENV_QUERY_INTENT_MAPPING or {}
+
+        matched_type: Optional[str] = None
+        for qtype, keywords in mapping.items():
+            if any(kw in query for kw in (keywords or [])):
+                matched_type = qtype
+                break
+
+        if matched_type:
+            strategy["query_type"] = matched_type
+            if matched_type in ("performance", "reasoning"):
+                strategy["use_kg"] = True
+
+        logger.debug(f"🧠 查询意图分析(配置驱动): {strategy}")
         return strategy
+
+    def _limit_keywords_in_query(self, query: str, max_keywords: int) -> str:
+        """将查询按空白和常见标点粗分词，取前N个关键词，避免KG超长关键词集合导致超时。"""
+        if not query or max_keywords <= 0:
+            return query
+        import re
+        # 分割为词元（中文/英文/数字混合场景的粗切分）
+        tokens = [t for t in re.split(r"[\s,;，；。.!！？、]+", query) if t]
+        if len(tokens) <= max_keywords:
+            return query
+        limited = tokens[:max_keywords]
+        return " ".join(limited)
     
     async def _merge_search_results(
         self, 

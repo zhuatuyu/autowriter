@@ -41,6 +41,24 @@ ENV_EVIDENCE_KEYWORD_MAPPING = PerformanceConfig.get_evidence_keyword_mapping()
 # =============================================================================
 ENV_QUERY_INTENT_MAPPING = PerformanceConfig.get_intelligent_search_config().get('query_intent_mapping', {})
 ENV_SEARCH_MODE_WEIGHTS = PerformanceConfig.get_intelligent_search_config().get('search_mode_weights', {})
+ENV_INTELLIGENT_TOPK = PerformanceConfig.get_intelligent_search_config().get('top_k', {})
+
+# 可选：知识图谱关键词上限（默认5，可在 config/performance_config.yaml 配置）
+try:
+    _KG_CONF = PerformanceConfig.get_intelligent_search_config().get('knowledge_graph', {})
+except Exception:
+    _KG_CONF = {}
+ENV_KG_MAX_KEYWORDS = int(_KG_CONF.get('max_keywords', 5) or 5)
+
+# 可选：LLM输入token上限（默认120000，可在 config/performance_config.yaml 配置）
+try:
+    _LLM_LIMITS = PerformanceConfig.get_llm_limits()
+except Exception:
+    _LLM_LIMITS = {}
+try:
+    ENV_MAX_INPUT_TOKENS = int(_LLM_LIMITS.get('max_input_tokens', 120000) or 120000)
+except Exception:
+    ENV_MAX_INPUT_TOKENS = 120000
 
 # =============================================================================
 # 领域信息常量
@@ -63,10 +81,27 @@ ENV_SECTION_CONFIGURATIONS = PerformanceConfig.get_section_configurations()
 # 提示词模板常量
 # =============================================================================
 ENV_ARCHITECT_BASE_SYSTEM = PerformanceConfig.get_architect_base_system()
-ENV_PROJECT_INFO_EXTRACTION_PROMPT = PerformanceConfig.get_project_info_extraction_prompt()
+# 不再需要LLM提取项目信息，改由项目yaml提供，移除相关提示词常量
 ENV_RAG_KEYWORDS_GENERATION_PROMPT = PerformanceConfig.get_rag_keywords_generation_prompt()
 ENV_SECTION_PROMPT_GENERATION_TEMPLATE = PerformanceConfig.get_section_prompt_generation_template()
 ENV_METRICS_DESIGN_PROMPT = PerformanceConfig.get_metrics_design_prompt()
+ 
+# 研究类提示词常量
+ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM = PerformanceConfig.get_research_prompt('comprehensive_research_base_system')
+ENV_RESEARCH_TOPIC_SYSTEM = PerformanceConfig.get_research_prompt('research_topic_system')
+ENV_SEARCH_KEYWORDS_PROMPT = PerformanceConfig.get_research_prompt('search_keywords_prompt')
+ENV_DECOMPOSE_RESEARCH_PROMPT = PerformanceConfig.get_research_prompt('decompose_research_prompt')
+ENV_RANK_URLS_PROMPT = PerformanceConfig.get_research_prompt('rank_urls_prompt')
+ENV_WEB_CONTENT_ANALYSIS_PROMPT = PerformanceConfig.get_research_prompt('web_content_analysis_prompt')
+ENV_GENERATE_RESEARCH_BRIEF_PROMPT = PerformanceConfig.get_research_prompt('generate_research_brief_prompt')
+ENV_RESEARCH_DECOMPOSITION_NUMS = PerformanceConfig.get_research_decomposition_nums()
+ENV_RESEARCH_URLS_PER_QUERY = PerformanceConfig.get_research_url_per_query()
+
+# 写作类提示词常量
+ENV_WRITER_BASE_SYSTEM = PerformanceConfig.get_writer_prompt('writer_base_system')
+ENV_SECTION_WRITING_PROMPT = PerformanceConfig.get_writer_prompt('section_writing_prompt')
+ENV_WRITER_EVALUATION_PROMPT_TEMPLATE = PerformanceConfig.get_writer_evaluation_prompt_template()
+ENV_METRIC_PROMPT_SPEC = PerformanceConfig.get_metric_prompt_spec()
 
 # =============================================================================
 # 辅助函数常量（保留常用的评价函数）

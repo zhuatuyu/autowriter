@@ -5,8 +5,10 @@
 from metagpt.roles import Role
 from metagpt.schema import Message
 from metagpt.logs import logger
+from datetime import datetime
 
-from backend.actions.writer_action import WriteSection, IntegrateReport, EvaluateMetrics
+from backend.actions.writer_action import WriteSection
+from backend.actions.metric_action import EvaluateMetrics
 from backend.actions.pm_action import CreateTaskPlan, TaskPlan, Task
 from backend.actions.research_action import ConductComprehensiveResearch, ResearchData
 from backend.actions.architect_action import DesignReportStructure as ArchitectAction, MetricAnalysisTable, ArchitectOutput
@@ -24,7 +26,7 @@ class WriterExpert(Role):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        self.set_actions([WriteSection, EvaluateMetrics, IntegrateReport])
+        self.set_actions([WriteSection, EvaluateMetrics])
         self._watch([CreateTaskPlan, ConductComprehensiveResearch, ArchitectAction])
 
     async def _act(self) -> Message:
@@ -50,45 +52,9 @@ class WriterExpert(Role):
             # 解析所有数据 - 从instruct_content获取
             task_plan_msg = task_plan_msgs[-1]
             research_data_msg = research_data_msgs[-1]
-            metric_table_msg = None
-            
-            # 寻找包含MetricAnalysisTable的消息（现在和ReportStructure合并在一起）
-            memories = self.get_memories()
-            logger.info(f"🔍 开始搜索MetricAnalysisTable，总消息数: {len(memories)}")
-            
-            for i, msg in enumerate(memories):
-                logger.info(f"消息 {i}: cause_by={msg.cause_by}, has_instruct_content={hasattr(msg, 'instruct_content')}")
-                if hasattr(msg, 'instruct_content') and msg.instruct_content:
-                    logger.info(f"消息 {i} instruct_content类型: {type(msg.instruct_content)}")
-                    # 按照原生MetaGPT模式检查ArchitectOutput
-                    if isinstance(msg.instruct_content, ArchitectOutput):
-                        logger.info(f"消息 {i} 找到ArchitectOutput对象!")
-                        metric_table_msg = msg
-                        logger.info(f"✅ 找到ArchitectOutput数据: {type(msg.instruct_content)}")
-                        break
-                    # 检查动态生成的对象
-                    elif hasattr(msg.instruct_content, 'metric_analysis_table'):
-                        logger.info(f"消息 {i} 找到包含metric_analysis_table的对象!")
-                        metric_table_msg = msg
-                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
-                        break
-                    # 保持向后兼容性 - 检查直接的data_json
-                    elif hasattr(msg.instruct_content, 'data_json'):
-                        logger.info(f"消息 {i} 找到data_json属性!")
-                        metric_table_msg = msg
-                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
-                        break
-                    elif isinstance(msg.instruct_content, dict) and 'data_json' in msg.instruct_content:
-                        logger.info(f"消息 {i} 在字典中找到data_json键!")
-                        metric_table_msg = msg
-                        logger.info(f"✅ 找到MetricAnalysisTable数据: {type(msg.instruct_content)}")
-                        break
-                    else:
-                        logger.info(f"消息 {i} instruct_content内容: {str(msg.instruct_content)[:200]}...")
-            
-            if not metric_table_msg:
-                logger.warning("未找到MetricAnalysisTable数据")
-                return Message(content="等待指标数据...", cause_by=WriteSection)
+            # 直接使用最新的 Architect 输出，移除早期兼容与全量扫描
+            metric_table_msg = metric_table_msgs[-1]
+            logger.info("✅ 使用最新 Architect 输出作为指标数据源")
             
             # 获取实际数据
             if hasattr(task_plan_msg, 'instruct_content') and task_plan_msg.instruct_content:
@@ -125,73 +91,31 @@ class WriterExpert(Role):
             elif isinstance(research_data, dict):
                 vector_store_path = research_data.get('vector_store_path')
             
-            # 获取指标数据
-            metric_data = "{}"  # 默认空JSON
+            # 获取指标数据（仅支持 ArchitectOutput，去除早期兼容）
+            metric_data = "{}"
             if hasattr(metric_table_msg, 'instruct_content') and metric_table_msg.instruct_content:
                 instruct_content = metric_table_msg.instruct_content
-                
-                # 按照原生MetaGPT模式处理ArchitectOutput
                 if isinstance(instruct_content, ArchitectOutput):
                     metric_data = instruct_content.metric_analysis_table.data_json
-                    logger.info(f"✅ 从ArchitectOutput获取metric_data")
-                # 处理动态生成的对象
-                elif hasattr(instruct_content, 'metric_analysis_table'):
-                    metric_table = instruct_content.metric_analysis_table
-                    if hasattr(metric_table, 'data_json'):
-                        metric_data = metric_table.data_json
-                        logger.info(f"✅ 从动态对象获取metric_data")
-                    else:
-                        metric_data = str(metric_table)
-                        logger.info(f"✅ 从动态对象获取metric_data (字符串格式)")
-                # 保持向后兼容性
-                elif hasattr(instruct_content, 'data_json'):
-                    metric_data = instruct_content.data_json
-                    logger.info(f"✅ 从直接data_json属性获取metric_data")
-                elif isinstance(instruct_content, dict) and 'data_json' in instruct_content:
-                    metric_data = instruct_content['data_json']
-                    logger.info(f"✅ 从字典data_json键获取metric_data")
-                elif isinstance(instruct_content, dict):
-                    metric_data = str(instruct_content)
-                    logger.info(f"✅ 使用整个字典作为metric_data")
+                    logger.info("✅ 从最新ArchitectOutput获取metric_data")
+                else:
+                    logger.error("指标数据格式不符合预期（非 ArchitectOutput）")
+                    return Message(content="指标数据格式错误", cause_by=WriteSection)
+            else:
+                logger.error("最新 Architect 输出缺少 instruct_content")
+                return Message(content="指标数据缺失", cause_by=WriteSection)
             
-            # === 新的完整工作流程 ===
-            
-            # 阶段1: 主报告章节写作
-            logger.info("📝 阶段1: 开始主报告章节写作...")
-            sections = []
-            write_action = WriteSection()
-            
-            for i, task in enumerate(tasks):
-                try:
-                    task_obj = task if hasattr(task, 'section_title') else Task(
-                        task_id=i,
-                        section_title=task.get('section_title', f'章节{i+1}'),
-                        instruction=task.get('instruction', task.get('description', '分析内容')),
-                        metric_ids=task.get('metric_ids', [])
-                    )
-                    
-                    section_content = await write_action.run(
-                        task=task_obj,
-                        vector_store_path=vector_store_path,
-                        metric_table_json=metric_data
-                    )
-                    sections.append(section_content)
-                    logger.info(f"✅ 完成主报告章节: {task_obj.section_title}")
-                except Exception as e:
-                    logger.error(f"生成章节{i+1}失败: {e}")
-                    # 生成一个简单的默认章节
-                    section_title = task_obj.section_title if hasattr(task_obj, 'section_title') else f'章节{i+1}'
-                    default_content = f"# {section_title}\n\n基于研究数据的分析内容。\n"
-                    sections.append(default_content)
-            
-            # 阶段2: 指标评分处理
-            logger.info("📊 阶段2: 开始指标评分处理...")
+            # === 新的完整工作流程（先评分后写作） ===
+
+            # 阶段1: 指标评分处理并回写指标表
+            logger.info("📊 阶段1: 开始指标评分处理...")
             metrics_evaluation_result = {}
             try:
                 evaluate_action = EvaluateMetrics()
                 metrics_evaluation_result = await evaluate_action.run(
                     metric_table_json=metric_data,
-                    vector_store_path=vector_store_path
+                    vector_store_path=vector_store_path,
+                    metric_table_md_path=str(self._project_repo.docs.workdir / "metric_analysis_table.md") if hasattr(self, '_project_repo') and self._project_repo else None
                 )
                 
                 if "error" in metrics_evaluation_result:
@@ -214,33 +138,113 @@ class WriterExpert(Role):
                     "grade": "评分失败"
                 }
             
-            # 阶段3: 整合最终报告
-            logger.info("📄 阶段3: 开始整合最终报告...")
-            integrate_action = IntegrateReport()
-            final_report = await integrate_action.run(
-                sections=sections,
-                report_title=title,
-                metrics_evaluation=metrics_evaluation_result  # 传入指标评分结果
-            )
+            # 评分后：若存在metrics md，读取其中的JSON作为后续章节写作的指标数据源
+            updated_metric_data = metric_data
+            try:
+                if hasattr(self, '_project_repo') and self._project_repo:
+                    from pathlib import Path as _Path
+                    import re as _re
+                    md_path = _Path(self._project_repo.docs.workdir) / "metric_analysis_table.md"
+                    if md_path.exists():
+                        text = md_path.read_text(encoding="utf-8")
+                        m = _re.search(r"```json\s*(.*?)\s*```", text, flags=_re.DOTALL)
+                        if m:
+                            updated_metric_data = m.group(1)
+                            logger.info("📝 已读取回写后的指标JSON用于章节写作")
+            except Exception as e:
+                logger.warning(f"读取已回写指标表失败，继续使用Architect输出: {e}")
+
+            # 阶段2: 主报告章节写作
+            logger.info("📝 阶段2: 开始主报告章节写作...")
+            sections = []
+            write_action = WriteSection()
             
-            # 保存最终报告到文件 - 添加时间戳避免覆盖
-            if hasattr(self, '_project_repo') and self._project_repo:
+            for i, task in enumerate(tasks):
                 try:
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                    filename = f"final_report_{timestamp}.md"
-                    
-                    await self._project_repo.docs.save(
-                        filename=filename,
-                        content=final_report
+                    task_obj = task if hasattr(task, 'section_title') else Task(
+                        task_id=i,
+                        section_title=task.get('section_title', f'章节{i+1}'),
+                        instruction=task.get('instruction', task.get('description', '分析内容')),
                     )
-                    logger.info(f"最终报告已保存到: {self._project_repo.docs.workdir}/{filename}")
+                    
+                    section_content = await write_action.run(
+                        task=task_obj,
+                        vector_store_path=vector_store_path,
+                        metric_table_json=updated_metric_data
+                    )
+                    sections.append(section_content)
+                    logger.info(f"✅ 完成主报告章节: {task_obj.section_title}")
                 except Exception as e:
-                    logger.error(f"保存最终报告失败: {e}")
+                    logger.error(f"生成章节{i+1}失败: {e}")
+                    # 生成一个简单的默认章节
+                    section_title = task_obj.section_title if hasattr(task_obj, 'section_title') else f'章节{i+1}'
+                    default_content = f"# {section_title}\n\n基于研究数据的分析内容。\n"
+                    sections.append(default_content)
             
+            # 阶段3: 生成最终报告（不再整合指标表，仅汇总章节内容；按 report_structure.md 指定顺序）
+            try:
+                final_report = ""
+                ordered_sections = []
+                # 尝试读取 report_structure.md 以确定章节顺序
+                structure_titles = []
+                if hasattr(self, '_project_repo') and self._project_repo:
+                    struct_path = self._project_repo.docs.workdir / "report_structure.md"
+                    if struct_path.exists():
+                        txt = struct_path.read_text(encoding="utf-8")
+                        for line in txt.splitlines():
+                            s = line.strip()
+                            if s.startswith('#'):
+                                # 去掉#与空格
+                                title = s.lstrip('#').strip()
+                                if title:
+                                    structure_titles.append(title)
+                
+                # 从章节内容提取标题映射
+                def normalize_title(t: str) -> str:
+                    # 去除常见编号前缀，例如“X、”“一、”“1.”等，仅做轻量归一
+                    t = t.strip()
+                    for sep in ["、", ".", "：", ":"]:
+                        if sep in t[:4]:
+                            t = t.split(sep, 1)[-1].strip()
+                            break
+                    return t
+                
+                section_title_to_content = {}
+                for sec in sections:
+                    first_line = sec.splitlines()[0] if sec else ""
+                    first_line = first_line.lstrip('#').strip()
+                    if first_line:
+                        section_title_to_content[normalize_title(first_line)] = sec
+                
+                # 按结构文件顺序挑选；若匹配不到则按生成顺序补齐
+                picked_keys = set()
+                for st in structure_titles:
+                    key = normalize_title(st)
+                    if key in section_title_to_content:
+                        ordered_sections.append(section_title_to_content[key])
+                        picked_keys.add(key)
+                # 补齐未匹配的章节
+                for sec in sections:
+                    first_line = sec.splitlines()[0] if sec else ""
+                    key = normalize_title(first_line.lstrip('#').strip()) if first_line else ""
+                    if key and key not in picked_keys:
+                        ordered_sections.append(sec)
+                        picked_keys.add(key)
+                
+                # 组装并保存
+                final_report = "\n\n".join(ordered_sections) if ordered_sections else "\n\n".join(sections)
+                if hasattr(self, '_project_repo') and self._project_repo:
+                    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+                    fname = f"final_report_{ts}.md"
+                    await self._project_repo.docs.save(filename=fname, content=final_report)
+                    logger.info(f"📝 最终报告已保存: {self._project_repo.docs.workdir / fname}")
+            except Exception as e:
+                logger.error(f"最终报告生成失败: {e}")
+            
+            # 不再整合最终报告，返回一个简要完成提示
             return Message(
-                content=final_report,
-                cause_by=IntegrateReport
+                content="章节写作完成并已对指标进行评分，结果已回写至 metric_analysis_table.md",
+                cause_by=WriteSection
             )
             
         except Exception as e:

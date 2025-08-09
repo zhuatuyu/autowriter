@@ -42,6 +42,17 @@ class Company:
             # 获取或创建团队
             team = await self._get_or_create_team(project_id, environment, workspace_config)
             
+            # 在路由前将项目信息注入Architect角色
+            try:
+                from backend.roles.architect import Architect as ArchitectRole
+                for role in team.env.roles.values():
+                    if isinstance(role, ArchitectRole) and hasattr(role, "set_project_info"):
+                        role.set_project_info(project_config.get('project_info', {}))
+                        logger.info("📋 已向Architect注入项目信息")
+                        break
+            except Exception as e:
+                logger.warning(f"注入项目信息到Architect失败: {e}")
+
             # 路由消息到团队
             result = await self._route_message(team, message, project_id, file_paths)
             
@@ -212,7 +223,7 @@ class Company:
             
             # 🎯 纯终端模式 - 直接启动团队任务，无需监控
             logger.info("🔄 启动团队SOP流程...")
-            await team.run(n_round=10)
+            await team.run(n_round=4)
             logger.info("✅ 团队SOP流程执行完成")
             
         except Exception as e:

@@ -219,7 +219,8 @@ class IntelligentSearchService:
 
         if matched_type:
             strategy["query_type"] = matched_type
-            if matched_type in ("performance", "reasoning"):
+            # 根据配置优先级：reasoning/policy 强制开启 KG；其余由权重决定
+            if matched_type in ("reasoning", "policy"):
                 strategy["use_kg"] = True
 
         logger.debug(f"🧠 查询意图分析(配置驱动): {strategy}")

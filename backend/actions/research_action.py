@@ -8,8 +8,10 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Tuple
 import hashlib
+import json
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, TypeAdapter
 from metagpt.actions import Action
@@ -148,9 +150,47 @@ class ConductComprehensiveResearch(Action):
             topic, combined_content, vector_store_path
         )
 
+        # 收集允许引用的来源白名单
+        allowed_web_urls: List[str] = []
+        try:
+            # 从研究内容中提取浏览过的URL（#### 来源: <url>）
+            if online_research_content:
+                for line in online_research_content.splitlines():
+                    if line.startswith("#### 来源:"):
+                        url = line.split("#### 来源:", 1)[1].strip()
+                        if url.startswith("http"):
+                            allowed_web_urls.append(url)
+        except Exception:
+            pass
+        # 去重
+        allowed_web_urls = list(dict.fromkeys(allowed_web_urls))
+
+        allowed_project_docs: List[str] = []
+        try:
+            if vector_store_path:
+                p = Path(vector_store_path)
+                if p.exists() and p.is_dir():
+                    for fp in p.glob("*.md"):
+                        allowed_project_docs.append(fp.name)
+            # 同时纳入本轮本地文档文件名
+            if local_docs and local_docs.docs:
+                for d in local_docs.docs:
+                    allowed_project_docs.append(d.filename)
+            allowed_project_docs = list(dict.fromkeys(allowed_project_docs))
+        except Exception:
+            pass
+
         # 使用安全占位符替换，避免 JSON 花括号与 str.format 冲突导致 KeyError
         prompt_template = ENV_GENERATE_RESEARCH_BRIEF_PROMPT
-        prompt = prompt_template.replace("{content}", enhanced_content).replace("{topic}", topic)
+        time_stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        prompt = (
+            prompt_template
+            .replace("{content}", enhanced_content)
+            .replace("{topic}", topic)
+            .replace("{time_stamp}", time_stamp)
+            .replace("{allowed_web_urls}", json.dumps(allowed_web_urls, ensure_ascii=False))
+            .replace("{allowed_project_docs}", json.dumps(allowed_project_docs, ensure_ascii=False))
+        )
         # 防止超长输入触发底层提供商长度限制：截断到安全长度
         safe_prompt = prompt[:ENV_MAX_INPUT_TOKENS]
         brief = await self._aask(safe_prompt, [ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM])
@@ -277,9 +317,9 @@ class ConductComprehensiveResearch(Action):
                 search_result = await intelligent_search.intelligent_search(
                     query=query,
                     project_vector_storage_path=vector_store_path,
-                    mode="knowledge_graph",  # 优先使用知识图谱推理
+                    mode="hybrid",  # 由权重与意图路由决定是否走KG
                     enable_global=True,
-                    max_results=2
+                    max_results=5
                 )
                 
                 if search_result.get("results"):
@@ -443,7 +483,18 @@ class ConductComprehensiveResearch(Action):
             logger.error(f"❌ 搜索失败 {query}: {e}")
             raise e  # 直接抛出异常，不隐藏
     
-        _results_str = "\n".join(f"{i}: {res}" for i, res in enumerate(results))
+        # 以机器可读JSON形式提供候选，便于LLM进行域名白名单筛选
+        candidates = []
+        for i, res in enumerate(results):
+            link = res.get("link", "")
+            parsed = urlparse(link) if link else None
+            candidates.append({
+                "index": i,
+                "link": link,
+                "domain": (parsed.netloc if parsed else ""),
+                "title": res.get("title", ""),
+            })
+        _results_str = json.dumps(candidates, ensure_ascii=False)
         time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         prompt = ENV_RANK_URLS_PROMPT.format(topic=topic, query=query, results=_results_str, time_stamp=time_stamp)
         
@@ -458,13 +509,40 @@ class ConductComprehensiveResearch(Action):
         
         try:
             indices = OutputParser.extract_struct(indices_str, list)
-            if not indices:
-                logger.error(f"❌ LLM返回空的排序索引: {indices_str}")
-                raise ValueError(f"LLM URL排序失败，返回空索引列表")
-            ranked_results = [results[i] for i in indices if i < len(results)]
-        except Exception as e:
-            logger.error(f"❌ URL排序失败: {e}")
-            raise e  # 不降级，直接抛出错误
+        except Exception:
+            indices = []
+
+        ranked_results = []
+        if indices:
+            ranked_results = [results[i] for i in indices if isinstance(i, int) and i < len(results)]
+        
+        # 当LLM因白名单过严或解析失败返回空索引时，采用代码级白名单回退，避免流程中断
+        if not ranked_results:
+            logger.warning("⚠️ LLM URL排序返回空，启用程序化白名单回退")
+            def is_whitelisted(url: str) -> bool:
+                try:
+                    host = urlparse(url).netloc.lower()
+                    if not host:
+                        return False
+                    # 从配置读取白名单
+                    from backend.config.performance_config import PerformanceConfig
+                    i_cfg = PerformanceConfig.get_intelligent_search_config() or {}
+                    wl = i_cfg.get("url_whitelist", {}) if isinstance(i_cfg, dict) else {}
+                    suffixes = wl.get("suffix", []) or []
+                    hosts = wl.get("hosts", []) or []
+                    # 后缀规则
+                    for suf in suffixes:
+                        if host.endswith(suf.lower()):
+                            return True
+                    # 精确主机规则
+                    if host in {h.lower() for h in hosts}:
+                        return True
+                    return False
+                except Exception:
+                    return False
+
+            filtered = [res for res in results if is_whitelisted(res.get("link", ""))]
+            ranked_results = filtered[:num_results] if filtered else results[:num_results]
     
         final_urls = [res['link'] for res in ranked_results[:num_results]]
         logger.info(f"最终获得 {len(final_urls)} 个URL用于查询: {query}")

@@ -10,6 +10,8 @@
 import asyncio
 import argparse
 import sys
+import json
+import re
 from pathlib import Path
 
 sys.path.append('.')
@@ -18,7 +20,46 @@ from backend.services.global_knowledge import global_knowledge
 from backend.services.knowledge_graph import performance_kg
 
 
-async def build_global_knowledge_base(file_paths: list, build_vector: bool = True, build_kg: bool = False):
+def _infer_domain_tags(file_name: str) -> list:
+    name = file_name.lower()
+    tags = []
+    if any(k in name for k in ["法", "规", "条例", "办法", "政策", "法规"]):
+        tags.append("政策规范")
+    if any(k in name for k in ["标准", "规范", "指南"]):
+        tags.append("标准规范")
+    if any(k in name for k in ["方法", "模型", "流程", "评价", "方法论"]):
+        tags.append("方法论")
+    if any(k in name for k in ["模板", "样例", "示例", "范本"]):
+        tags.append("模板")
+    if not tags:
+        tags.append("通用")
+    return tags
+
+
+def _infer_year_and_version(file_name: str) -> tuple[int | None, str]:
+    # 年份：匹配4位数字
+    year_match = re.search(r"(20\d{2}|19\d{2})", file_name)
+    year = int(year_match.group(1)) if year_match else None
+    # 版本：中文“第X版”→ vX
+    version = "v1"
+    mapping = {"第一版": "v1", "第二版": "v2", "第三版": "v3", "第四版": "v4", "第五版": "v5"}
+    for zh, v in mapping.items():
+        if zh in file_name:
+            version = v
+            break
+    return year, version
+
+
+def _write_sidecar_meta(target_path: Path, meta: dict) -> None:
+    try:
+        meta_path = target_path.with_suffix(target_path.suffix + ".meta.json")
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"🧾 元数据已写入: {meta_path}")
+    except Exception as e:
+        print(f"⚠️ 写入元数据失败 {target_path.name}: {e}")
+
+
+async def build_global_knowledge_base(file_paths: list, build_vector: bool = True, build_kg: bool = False, chunk_size: int = 512, overlap: int = 50):
     """🧠 从指定文件构建全局知识库（向量索引 + 知识图谱）"""
     print(f"🌍 构建全局知识库... 向量索引: {build_vector}, 知识图谱: {build_kg}")
     
@@ -55,6 +96,22 @@ async def build_global_knowledge_base(file_paths: list, build_vector: bool = Tru
             else:
                 category = "general"
             
+            # 生成元数据并写入旁车文件（与原文件同目录）
+            stem = Path(file_path).stem
+            domain_tags = _infer_domain_tags(file_name)
+            year, version = _infer_year_and_version(file_name)
+            meta = {
+                "source": "global",
+                "doc_id": stem,
+                "domain_tags": domain_tags,
+                "year": year,
+                "version": version,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+                "category": category,
+            }
+            _write_sidecar_meta(Path(file_path), meta)
+
             success = global_knowledge.add_global_document(file_path, category)
             if success:
                 print(f"📄 已添加: {file_name} -> {category}")
@@ -63,7 +120,11 @@ async def build_global_knowledge_base(file_paths: list, build_vector: bool = Tru
         
         # 构建索引
         print("\n🔧 构建全局向量索引...")
-        success_vector = await global_knowledge.build_global_index(force_rebuild=True)
+        try:
+            # 若全局知识实现支持，传入切分参数；否则回退
+            success_vector = await global_knowledge.build_global_index(force_rebuild=True, chunk_size=chunk_size, overlap=overlap)
+        except TypeError:
+            success_vector = await global_knowledge.build_global_index(force_rebuild=True)
         
         if success_vector:
             # 显示统计信息
@@ -91,6 +152,18 @@ async def build_global_knowledge_base(file_paths: list, build_vector: bool = Tru
                 import shutil
                 shutil.copy2(file_path, target_path)
                 print(f"📄 已复制文件到知识图谱目录: {file_name}")
+                # 同步写入KG侧元数据旁车文件
+                stem = Path(file_path).stem
+                domain_tags = _infer_domain_tags(file_name)
+                year, version = _infer_year_and_version(file_name)
+                meta = {
+                    "source": "global",
+                    "doc_id": stem,
+                    "domain_tags": domain_tags,
+                    "year": year,
+                    "version": version,
+                }
+                _write_sidecar_meta(target_path, meta)
             except Exception as e:
                 print(f"❌ 复制文件失败 {file_name}: {e}")
         
@@ -166,6 +239,15 @@ async def main():
         help='🚫 不构建向量索引（仅知识图谱）'
     )
     
+    parser.add_argument(
+        '--chunk-size', type=int, default=512,
+        help='向量索引切分块大小，默认512'
+    )
+    parser.add_argument(
+        '--overlap', type=int, default=50,
+        help='向量索引切分重叠，默认50'
+    )
+
     args = parser.parse_args()
     
     # 确定构建选项
@@ -185,7 +267,13 @@ async def main():
     
     print(f"🎯 构建配置: 向量索引={build_vector}, 知识图谱={build_kg}")
     
-    success = await build_global_knowledge_base(args.files, build_vector=build_vector, build_kg=build_kg)
+    success = await build_global_knowledge_base(
+        args.files,
+        build_vector=build_vector,
+        build_kg=build_kg,
+        chunk_size=args.chunk_size,
+        overlap=args.overlap,
+    )
     
     if success:
         print("\n🎉 全局知识库已准备就绪！")

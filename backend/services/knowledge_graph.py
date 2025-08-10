@@ -142,12 +142,33 @@ class PerformanceKnowledgeGraph:
                 if not await self._load_knowledge_graph():
                     return "知识图谱不可用，请先构建知识图谱"
             
-            # 创建知识图谱查询引擎 - 使用正确的参数
+            # 创建知识图谱查询引擎 - 配置驱动（支持 kg_profiles 按意图切档）
+            retriever_mode = "keyword"
+            response_mode = "tree_summarize"
+            similarity_top_k_cfg = max_knowledge_sequence
+            try:
+                cfg = PerformanceConfig.get_intelligent_search_config() or {}
+                profiles = cfg.get("kg_profiles") or {}
+                # 依据意图推断策略（在 _enhance_domain_query 使用的相同意图分析）
+                intents = self._analyze_intents_by_config(query)
+                profile_key = intents[0] if intents else None
+                profile = profiles.get(profile_key) if profile_key else None
+                if isinstance(profile, dict):
+                    retriever_mode = profile.get("retriever_mode", retriever_mode)
+                    response_mode = profile.get("response_mode", response_mode)
+                    try:
+                        similarity_top_k_cfg = int(profile.get("similarity_top_k", similarity_top_k_cfg))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+
             kg_query_engine = self._kg_index.as_query_engine(
                 include_text=True,
-                retriever_mode="keyword",  # "keyword", "embedding", "keyword_embedding"
-                response_mode="tree_summarize",  # 使用官方推荐的响应模式
-                similarity_top_k=max_knowledge_sequence,
+                retriever_mode=retriever_mode,  # "keyword", "embedding"
+                response_mode=response_mode,
+                similarity_top_k=similarity_top_k_cfg,
                 verbose=True,
             )
             

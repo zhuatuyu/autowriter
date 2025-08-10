@@ -29,6 +29,9 @@ from .hybrid_search import hybrid_search
 from metagpt.config2 import Config
 from pathlib import Path
 
+# 配置驱动
+from backend.config.performance_config import PerformanceConfig
+
 
 class PerformanceKnowledgeGraph:
     """绩效分析报告领域知识图谱"""
@@ -37,8 +40,9 @@ class PerformanceKnowledgeGraph:
         self._kg_index = None
         self._kg_storage_path = "workspace/vector_storage/global_graph"
         
-        # 🎯 绩效分析报告领域的实体类型定义
-        self.entity_types = {
+        # 🎯 绩效分析报告领域的实体/关系 - 优先读取配置，缺失时回退到内置默认
+        configured_entity_types = PerformanceConfig.get_entity_types() or {}
+        self.entity_types = configured_entity_types if configured_entity_types else {
             "项目": ["项目名称", "项目类型", "实施地点", "资金规模"],
             "指标体系": ["决策指标", "过程指标", "产出指标", "效益指标"],
             "具体指标": ["指标名称", "计算方法", "目标值", "权重"],
@@ -47,9 +51,9 @@ class PerformanceKnowledgeGraph:
             "问题案例": ["问题类型", "原因分析", "解决方案", "改进建议"],
             "行业类型": ["基础设施", "公益事业", "民生保障", "环境治理"],
         }
-        
-        # 🎯 关系类型定义
-        self.relation_types = [
+
+        configured_relation_types = PerformanceConfig.get_relation_types() or []
+        self.relation_types = configured_relation_types if configured_relation_types else [
             "包含", "属于", "适用于", "遵循", "参考",
             "导致", "解决", "改进", "关联", "影响"
         ]
@@ -149,6 +153,17 @@ class PerformanceKnowledgeGraph:
             
             # 🧠 智能查询增强 - 根据领域特点优化查询
             enhanced_query = await self._enhance_domain_query(query)
+
+            # 🚦 增强后再次限词（可配置），避免增强文本引入过多关键词导致KG冗长推理
+            try:
+                cfg = PerformanceConfig.get_intelligent_search_config() or {}
+                kg_cfg = (cfg.get("knowledge_graph") or {}) if isinstance(cfg, dict) else {}
+                limit_after = bool(kg_cfg.get("limit_keywords_after_enhance", True))
+                max_after = int(kg_cfg.get("max_keywords_after_enhance", 5))
+                if limit_after and max_after > 0:
+                    enhanced_query = self._limit_keywords_in_text(enhanced_query, max_after)
+            except Exception:
+                pass
             
             # 执行查询
             response = await kg_query_engine.aquery(enhanced_query)
@@ -162,20 +177,58 @@ class PerformanceKnowledgeGraph:
         except Exception as e:
             logger.error(f"❌ 知识图谱查询失败: {e}")
             return f"查询失败: {e}"
+
+    def _limit_keywords_in_text(self, text: str, max_keywords: int) -> str:
+        """将文本按空白/标点切分后取前N个标记再拼接，控制查询长度。"""
+        if not text or max_keywords <= 0:
+            return text
+        import re
+        tokens = [t for t in re.split(r"[\s,;，；。.!！？、]+", text) if t]
+        if len(tokens) <= max_keywords:
+            return text
+        return " ".join(tokens[:max_keywords])
     
     async def _enhance_domain_query(self, query: str) -> str:
-        """🎯 绩效分析领域的查询增强"""
-        # 检测查询类型并添加领域特定的上下文
-        if any(keyword in query for keyword in ["指标", "评价", "绩效"]):
-            return f"在绩效分析评价体系中，{query}。请重点关注决策、过程、产出、效益四个维度的相关信息。"
-        elif any(keyword in query for keyword in ["项目", "实施", "管理"]):
-            return f"关于项目实施和管理，{query}。请分析项目背景、实施过程、组织管理等方面的信息。"
-        elif any(keyword in query for keyword in ["问题", "风险", "挑战"]):
-            return f"针对项目风险和问题，{query}。请识别潜在风险因素及其影响。"
-        elif any(keyword in query for keyword in ["建议", "改进", "优化"]):
-            return f"关于改进建议，{query}。请结合最佳实践和成功案例提供建议。"
-        else:
+        """🎯 基于配置的查询增强：使用 intelligent_search.query_intent_mapping 动态分析意图"""
+        intents = self._analyze_intents_by_config(query)
+        if not intents:
             return query
+        context = self._build_intent_context(intents)
+        # 提示实体类型与关系类型，利于KG推理
+        entity_type_list = ", ".join(list(self.entity_types.keys())[:8])
+        relation_type_list = ", ".join(self.relation_types[:8])
+        preface = (
+            f"请结合领域知识图谱进行回答；优先使用已知实体类型（{entity_type_list} 等）与关系（{relation_type_list} 等）进行推理与引用。\n"
+        )
+        return f"{context}\n{preface}{query}"
+
+    def _analyze_intents_by_config(self, query: str) -> List[str]:
+        """根据配置的意图关键词映射分析查询意图"""
+        try:
+            cfg = PerformanceConfig.get_intelligent_search_config() or {}
+            mapping: Dict[str, List[str]] = cfg.get("query_intent_mapping", {})
+            matched: List[str] = []
+            q = query or ""
+            for intent, keywords in mapping.items():
+                if not isinstance(keywords, list):
+                    continue
+                if any(kw for kw in keywords if kw and kw in q):
+                    matched.append(intent)
+            return matched
+        except Exception:
+            return []
+
+    def _build_intent_context(self, intents: List[str]) -> str:
+        """把意图映射为领域上下文说明，避免硬编码 if/else，采用意图到模板的映射"""
+        intent_to_template: Dict[str, str] = {
+            "policy": "围绕政策/法规条款进行回答，注明条款出处，阐明适用范围与合规要求。",
+            "method": "围绕评价/分析方法与步骤（如AHP、计分规则）进行说明，并给出可复用的操作路径。",
+            "case": "围绕相似项目/案例进行对标，总结关键做法与成效，提供可引用的证据来源。",
+            "metric": "围绕绩效指标体系进行回答，优先按决策、过程、产出、效益四个维度组织，明确评价要点与计分方法。",
+            # 允许透传未知意图
+        }
+        parts = [intent_to_template.get(i, f"围绕{i} 相关知识进行说明，并提供证据与可执行路径。") for i in intents]
+        return "\n".join(parts)
     
     async def _post_process_kg_response(self, response: str, original_query: str) -> str:
         """🧠 知识图谱响应的智能后处理"""

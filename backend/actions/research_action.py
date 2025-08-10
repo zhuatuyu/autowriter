@@ -148,7 +148,9 @@ class ConductComprehensiveResearch(Action):
             topic, combined_content, vector_store_path
         )
 
-        prompt = ENV_GENERATE_RESEARCH_BRIEF_PROMPT.format(content=enhanced_content, topic=topic)
+        # 使用安全占位符替换，避免 JSON 花括号与 str.format 冲突导致 KeyError
+        prompt_template = ENV_GENERATE_RESEARCH_BRIEF_PROMPT
+        prompt = prompt_template.replace("{content}", enhanced_content).replace("{topic}", topic)
         # 防止超长输入触发底层提供商长度限制：截断到安全长度
         safe_prompt = prompt[:ENV_MAX_INPUT_TOKENS]
         brief = await self._aask(safe_prompt, [ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM])
@@ -232,10 +234,13 @@ class ConductComprehensiveResearch(Action):
         """将网络研究内容添加到现有项目知识库"""
         try:
             from backend.services.hybrid_search import hybrid_search
+            from datetime import datetime
             
+            # 固定更友好的文件名并追加时间戳，避免过长/含特殊字符与覆盖
+            ts = datetime.now().strftime("%Y%m%d%H%M%S")
             success = hybrid_search.add_content_to_project(
                 content=online_content,
-                filename=f"网络研究_{topic}.md",
+                filename=f"网络案例深度研究报告{ts}.md",
                 project_vector_storage_path=project_vector_path
             )
             

@@ -8,12 +8,12 @@ from typing import List, Dict, Optional, Literal
 from metagpt.logs import logger
 from .hybrid_search import hybrid_search
 from .knowledge_graph import performance_kg
-from backend.config.performance_constants import (
-    ENV_QUERY_INTENT_MAPPING,
-    ENV_SEARCH_MODE_WEIGHTS,
-    ENV_INTELLIGENT_TOPK,
+from backend.config.global_prompts import (
+    QUERY_INTENT_MAPPING as ENV_QUERY_INTENT_MAPPING,
+    SEARCH_MODE_WEIGHTS as ENV_SEARCH_MODE_WEIGHTS,
+    TOP_K as ENV_INTELLIGENT_TOPK,
+    KG_CONF,
 )
-from backend.config.performance_constants import ENV_KG_MAX_KEYWORDS
 
 
 
@@ -120,7 +120,8 @@ class IntelligentSearchService:
             if project_path:
                 try:
                     # 依据配置限制关键词数量：粗粒度按空白/标点分词截取
-                    limited_query = self._limit_keywords_in_query(query, ENV_KG_MAX_KEYWORDS)
+                    max_kw = int(KG_CONF.get('max_keywords', 5) or 5)
+                    limited_query = self._limit_keywords_in_query(query, max_kw)
                     kg_result = await performance_kg.query_knowledge_graph(
                         query=limited_query,
                         mode="keyword",  # 修复：使用支持的模式

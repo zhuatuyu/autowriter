@@ -75,8 +75,13 @@ class ProductManager(Role):
         user_req_msgs = self.rc.memory.get_by_action(UserRequirement)
         if user_req_msgs:
             latest_msg = user_req_msgs[-1]
-            # 正确解析Message内容
-            topic = latest_msg.content if isinstance(latest_msg.content, str) else str(latest_msg.content)
+            # 正确解析Message内容并清洗MetaGPT前缀
+            raw = latest_msg.content if isinstance(latest_msg.content, str) else str(latest_msg.content)
+            try:
+                import re as _re
+                topic = _re.sub(r"^\[Message\].*?:\s*", "", raw).strip()
+            except Exception:
+                topic = raw
         else:
             topic = "未定义的研究主题"
         

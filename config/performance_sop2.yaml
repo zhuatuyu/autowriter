@@ -1,0 +1,132 @@
+# SOP2 覆盖配置：章节结构与写作
+report_structure:
+  sections:
+    - title: "一、项目概述"
+      key: "overview"
+      prompt_template: |
+        请围绕项目背景、资金与预算、实施情况、组织管理、绩效目标（表格展示）进行撰写。
+    - title: "二、综合绩效评价结论"
+      key: "conclusion"
+      prompt_template: |
+        必须依据 metric_analysis_table.md 的评分结果，汇总总分与各维度分值与得分率，并引用关键opinion要点。
+    - title: "三、主要成效及经验"
+      key: "achievements"
+      prompt_template: |
+        结合数据和事实，总结成效，提炼可借鉴做法。
+    - title: "四、存在的问题和原因分析"
+      key: "problems"
+      prompt_template: |
+        针对扣分项逐条分析原因、依据与影响范围。
+    - title: "五、改进建议"
+      key: "suggestions"
+      prompt_template: |
+        针对问题提出具体可操作建议，标注责任与预期效果。
+
+prompts:
+  # 章节提示词生成模板（已在 base 常量中由代码读取，这里可按需覆盖）
+  section_prompt_generation: |
+    {base_prompt}
+    
+  research:
+    generate_research_brief_prompt: |
+      【输出格式硬性约束 - 仅输出JSON（扁平结构）】
+      - 你必须仅输出一个 JSON 对象，键严格为：
+        ["topic","generated_at","kb_sources","overview","conclusion","achievements","problems","suggestions","structure_focus","metric_citations","policy_refs","method_refs","case_refs"]。
+      - 字段说明：
+        - topic: 研究主题（string）
+        - generated_at: 时间戳（ISO8601 string）
+        - kb_sources: ["global_kg","project_vector","web"] 的子集（array[string]）
+        - overview: 项目与研究要点综述（string）
+        - conclusion: 综合结论（string）
+        - achievements: 主要成效（string）
+        - problems: 存在问题（string，需对接“二、四”章节写作重点）
+        - suggestions: 改进建议（string）
+        - structure_focus: 报告结构设计侧重点（string；指导 ArchitectContent 产出 report_structure.md）
+        - metric_citations: 写作时引用指标得分与意见的指引（string；强调“结论/问题章引用指标”）
+        - policy_refs: 重要政策/法规引用（string，引用自白名单来源）
+        - method_refs: 方法论与计分模型引用（string）
+        - case_refs: 对标案例与指标体系摘要（string）
+
+      【引用来源硬约束（禁用非白名单/示例链接）】
+      - allowed_web_urls: {allowed_web_urls}
+      - allowed_project_docs: {allowed_project_docs}
+      - 仅允许引用上述白名单来源；不得出现 example.com 等非白名单域。
+      - web 证据必须引用 allowed_web_urls 之一；项目文档使用文件名；全局KG仅允许关系/三元组文字描述，不得生成URL。
+      - 如确无证据，输出“信息待补充”。
+
+      【写作重点（SOP2侧重章节写作）】
+      - 需与 `report_structure.md` 强对齐：明确各章写作要点与需要引用的指标/证据类型；
+      - 强化“二、综合绩效评价结论”与“四、存在的问题和原因分析”使用指标得分与意见进行引用与分析；
+      - 对每个重点给出事实检索路径指引。
+
+      【仅输出JSON示例】
+      {{
+        "topic": "{topic}",
+        "generated_at": "{time_stamp}",
+        "kb_sources": ["global_kg","project_vector","web"],
+        "overview": "...",
+        "conclusion": "...",
+        "achievements": "...",
+        "problems": "...",
+        "suggestions": "...",
+        "structure_focus": "...",
+        "metric_citations": "...",
+        "policy_refs": "...",
+        "method_refs": "...",
+        "case_refs": "..."
+      }}
+    ### 📋 具体写作指导与检索要求：
+    {rag_instructions}
+    
+    ### 🔍 RAG检索策略：
+    写作时请严格按照以下步骤进行：
+    1. 首先检索上述关键信息项，获取具体数据和事实
+    2. 基于检索到的真实信息进行分析和论述
+    3. 避免泛泛而谈，确保每个论点都有具体的数据支撑
+    4. 如果某项信息检索不到，明确标注"信息待补充"
+
+writer:
+  writer_base_system: |
+    你是绩效评价报告的写作专家。你的目标是：
+    1. 基于事实依据和数据支撑，撰写高质量的报告章节
+    2. 严格遵循架构师制定的写作指导和检索要求
+    3. 确保内容专业、准确、深入，符合绩效评价报告的标准
+  section_writing_prompt: |
+    请根据以下信息撰写报告章节：
+
+    ## 章节标题
+    {section_title}
+
+    ## 写作要求与指导
+    {instruction}
+
+    ## 相关事实依据（来自向量检索）
+    {factual_basis}
+
+    ## 关联的绩效指标
+    {metrics_text}
+
+    ## 📋 写作标准与质量要求
+
+    ### 🎯 内容要求
+    1. 数据驱动：所有论点必须基于上述事实依据，避免空泛论述
+    2. 结构清晰：按照写作要求中的指导顺序组织内容
+    3. 深度分析：不仅要列出事实，还要分析原因、影响和趋势
+    4. 专业表达：使用绩效评价专业术语和商业分析语言
+
+    ### 📊 格式要求
+    1. 表格展示：涉及数据对比时，务必使用Markdown表格格式
+    2. 分层论述：使用适当的标题层级组织内容结构
+    3. 数据引用：明确标注数据来源和引用依据
+    4. 字数控制：章节内容控制在{word_limit}字以内
+
+    ### 🔍 检索验证要求
+    - 如果事实依据中缺少某项关键信息，请明确标注"信息待补充"
+    - 确保每个关键论点都有具体的数据或事实支撑
+    - 避免使用模糊的表述，如"大约"、"可能"等
+
+    请严格按照上述要求开始撰写：
+
+research_settings:
+  decomposition_nums: 2
+  url_per_query: 3

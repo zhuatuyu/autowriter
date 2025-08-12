@@ -11,6 +11,7 @@ from metagpt.tools import SearchEngineType
 from metagpt.schema import Message, AIMessage
 from metagpt.logs import logger
 from typing import Tuple
+from pathlib import Path
 
 
 class CustomTeamLeader(TeamLeader):
@@ -48,6 +49,22 @@ class CustomTeamLeader(TeamLeader):
         # 使用我们配置好的实例替换默认的SearchEnhancedQA
         if self.config.enable_search:
             self.tool_execution_map["SearchEnhancedQA.run"] = self.search_enhanced_qa_action.run
+
+        # 增加一个便捷命令，用于在SOP1阶段提示指标文件已生成，便于调试
+        async def _publish_metric_ready_message(path: str | None = None) -> str:
+            try:
+                base = "workspace/project01"  # 默认项目
+                if hasattr(self, "_project_repo") and self._project_repo:
+                    base = str(self._project_repo.workdir)
+                md = Path(base) / "docs" / "metric_analysis_table.md"
+                msg = f"指标结构已生成于 {md}，请指标评价专家进行评价。"
+                from metagpt.schema import UserMessage
+                await self.rc.env.publish_message(UserMessage(content=msg, sent_from=self.name))
+                return msg
+            except Exception as e:
+                return f"发布提示失败: {e}"
+
+        self.tool_execution_map["TeamLeader.publish_metric_ready"] = _publish_metric_ready_message
 
     async def _quick_think(self) -> Tuple[Message, str]:
         """重写_quick_think方法，使用我们配置好的SearchEnhancedQA实例"""

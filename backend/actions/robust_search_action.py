@@ -30,13 +30,11 @@ class RobustSearchEnhancedQA(SearchEnhancedQA):
         prompt = REWRITE_QUERY_PROMPT.format(q=query)
         
         try:
-            # 第一次尝试：使用原有逻辑
+            # 第一次尝试：使用原有逻辑（不注入项目配置，避免超长/不兼容参数问题）
             resp = await self._aask(prompt)
             rewritten_query = self._extract_rewritten_query_robust(resp)
-            
             logger.info(f"查询成功改写: '{query}' -> '忽略过长的rewritten_query'")
             return rewritten_query
-            
         except Exception as e:
             logger.warning(f"查询改写失败，错误: {e}. 使用原始查询进行搜索。")
             return query

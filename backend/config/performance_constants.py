@@ -31,9 +31,18 @@ ENV_DESIGN_QUERIES = PerformanceConfig.get_design_queries()
 # =============================================================================
 # 评价标准常量
 # =============================================================================
-ENV_SCORE_LEVELS = PerformanceConfig.get_score_levels()
-ENV_DIMENSION_WEIGHTS = PerformanceConfig.get_dimension_weights()
-ENV_LEVEL1_INDICATORS = PerformanceConfig.get_level1_indicators()
+try:
+    ENV_SCORE_LEVELS = PerformanceConfig.get_score_levels()
+except Exception:
+    ENV_SCORE_LEVELS = {}
+try:
+    ENV_DIMENSION_WEIGHTS = PerformanceConfig.get_dimension_weights()
+except Exception:
+    ENV_DIMENSION_WEIGHTS = {}
+try:
+    ENV_LEVEL1_INDICATORS = PerformanceConfig.get_level1_indicators()
+except Exception:
+    ENV_LEVEL1_INDICATORS = []
 ENV_EVIDENCE_KEYWORD_MAPPING = PerformanceConfig.get_evidence_keyword_mapping()
 
 # =============================================================================
@@ -70,7 +79,10 @@ ENV_DOMAIN_VERSION = ENV_DOMAIN_INFO.get('version', '1.0.0')
 # =============================================================================
 # 评价类型常量
 # =============================================================================
-ENV_EVALUATION_TYPES = PerformanceConfig.get_evaluation_types()
+try:
+    ENV_EVALUATION_TYPES = PerformanceConfig.get_evaluation_types()
+except Exception:
+    ENV_EVALUATION_TYPES = {}
 
 # =============================================================================
 # 章节配置常量
@@ -97,11 +109,16 @@ ENV_GENERATE_RESEARCH_BRIEF_PROMPT = PerformanceConfig.get_research_prompt('gene
 ENV_RESEARCH_DECOMPOSITION_NUMS = PerformanceConfig.get_research_decomposition_nums()
 ENV_RESEARCH_URLS_PER_QUERY = PerformanceConfig.get_research_url_per_query()
 
-# 写作类提示词常量
+# 写作类提示词常量（SOP2）
 ENV_WRITER_BASE_SYSTEM = PerformanceConfig.get_writer_prompt('writer_base_system')
 ENV_SECTION_WRITING_PROMPT = PerformanceConfig.get_writer_prompt('section_writing_prompt')
-ENV_WRITER_EVALUATION_PROMPT_TEMPLATE = PerformanceConfig.get_writer_evaluation_prompt_template()
-ENV_METRIC_PROMPT_SPEC = PerformanceConfig.get_metric_prompt_spec()
+
+# 评价类提示词常量（SOP1）
+ENV_EVALUATOR_BASE_SYSTEM = PerformanceConfig.get_evaluator_prompt('evaluator_base_system')
+ENV_EVALUATOR_PROMPT_TEMPLATE = PerformanceConfig.get_evaluator_prompt('evaluation_prompt_template')
+
+# 指标级提示词组合规范（与评价类型联动，放在 evaluator 下）
+ENV_METRIC_PROMPT_SPEC = PerformanceConfig.get_evaluator_prompts().get('metric_prompt_spec', {})
 
 # =============================================================================
 # 辅助函数常量（保留常用的评价函数）

@@ -2,12 +2,18 @@
 """
 项目经理角色 - 任务规划和调度
 """
+from pydantic import BaseModel
 from metagpt.roles import Role
 from metagpt.schema import Message
 from metagpt.logs import logger
 
-from backend.actions.pm_action import CreateTaskPlan, TaskPlan
-from backend.actions.architect_action import ReportStructure, DesignReportStructure as ArchitectAction, ArchitectOutput
+from backend.actions.project_manager_action import CreateTaskPlan, TaskPlan
+from backend.actions.architect_content_action import ReportStructure, DesignReportStructureOnly as ArchitectAction
+
+
+class ReportStructureProxy(BaseModel):
+    title: str
+    sections: list[dict]
 
 
 class ProjectManager(Role):
@@ -20,7 +26,7 @@ class ProjectManager(Role):
     constraints: str = "必须确保任务分解合理，便于WriterExpert执行"
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__()
         
         # 设置要执行的Action
         self.set_actions([CreateTaskPlan])
@@ -35,72 +41,59 @@ class ProjectManager(Role):
         todo = self.rc.todo
         
         if isinstance(todo, CreateTaskPlan):
-            # 从记忆中获取报告结构
+            # 从记忆中获取报告结构消息
             structure_msgs = self.rc.memory.get_by_action(ArchitectAction)
-            
             if not structure_msgs:
                 logger.error("未找到报告结构数据")
                 return Message(content="未找到报告结构数据", role=self.profile)
-            
-            # 获取最新的报告结构
             structure_msg = structure_msgs[-1]
-            if not hasattr(structure_msg, 'instruct_content') or not structure_msg.instruct_content:
-                logger.error("报告结构数据格式不正确")
-                return Message(content="报告结构数据格式不正确", role=self.profile)
-            
-            # 解析instruct_content中的ReportStructure数据
+            logger.info(f"📋 接收到架构师消息: {structure_msg.content}")
+
+            # 读取 Pydantic instruct_content
+            instruct_content = structure_msg.instruct_content
+            structure_file_path = getattr(instruct_content, "structure_file_path", "") if instruct_content else ""
+            if not structure_file_path:
+                logger.error("缺少结构文件路径 structure_file_path")
+                return Message(content="缺少结构文件路径", role=self.profile)
+
+            # 读取并解析 report_structure.md -> 构造 ReportStructure 代理
             try:
-                instruct_content = structure_msg.instruct_content
-                
-                # 按照原生MetaGPT模式解析ArchitectOutput
-                if isinstance(instruct_content, ArchitectOutput):
-                    # 直接从ArchitectOutput对象获取
-                    report_structure = instruct_content.report_structure
-                    logger.info(f"✅ 从ArchitectOutput获取ReportStructure: {report_structure.title}")
-                elif hasattr(instruct_content, 'report_structure'):
-                    # 处理动态生成的对象（MetaGPT可能会转换Pydantic对象）
-                    report_structure = ReportStructure(
-                        title=instruct_content.report_structure.title,
-                        sections=instruct_content.report_structure.sections
-                    )
-                    logger.info(f"✅ 从动态对象获取ReportStructure: {report_structure.title}")
-                elif hasattr(instruct_content, 'title'):
-                    # 向后兼容：直接的ReportStructure对象
-                    report_structure = ReportStructure(
-                        title=instruct_content.title,
-                        sections=instruct_content.sections
-                    )
-                    logger.info(f"✅ 从直接对象解析ReportStructure: {report_structure.title}")
-                elif isinstance(instruct_content, dict) and 'title' in instruct_content:
-                    # 向后兼容：字典格式的ReportStructure
-                    report_structure = ReportStructure(
-                        title=instruct_content['title'],
-                        sections=instruct_content['sections']
-                    )
-                    logger.info(f"✅ 从字典解析ReportStructure: {report_structure.title}")
-                else:
-                    logger.error(f"instruct_content格式不正确，内容: {str(instruct_content)[:200]}...")
-                    logger.error(f"instruct_content类型: {type(instruct_content)}")
-                    logger.error(f"instruct_content是否为字典: {isinstance(instruct_content, dict)}")
-                    if isinstance(instruct_content, dict):
-                        logger.error(f"instruct_content键列表: {list(instruct_content.keys())}")
-                    return Message(content="报告结构数据格式不正确", role=self.profile)
+                from pathlib import Path
+                import re
+                text = Path(structure_file_path).read_text(encoding="utf-8")
+                blocks = re.split(r"^###\s+\d+\.\s+", text, flags=re.MULTILINE)
+                titles = re.findall(r"^###\s+\d+\.\s+(.*)$", text, flags=re.MULTILINE)
+                sections = []
+                for idx, title in enumerate(titles, 1):
+                    guidance = blocks[idx] if idx < len(blocks) else ""
+                    sections.append({
+                        "section_title": title.strip(),
+                        "description_prompt": guidance.strip(),
+                    })
+                rs_proxy = ReportStructureProxy(title="绩效评价报告", sections=sections)
+                logger.info(f"✅ 解析 report_structure.md 成功，章节数: {len(sections)}")
             except Exception as e:
-                logger.error(f"解析报告结构失败: {e}")
-                return Message(content="解析报告结构失败", role=self.profile)
-            logger.info(f"ProjectManager开始创建任务计划，基于结构: {report_structure.title}")
-            
+                logger.error(f"解析 report_structure.md 失败: {e}")
+                return Message(content=f"解析报告结构失败: {e}", role=self.profile)
+
+            # 构造成真实 ReportStructure（使用原模型字段）
+            try:
+                from backend.actions.architect_content_action import Section
+                rs = ReportStructure(title=rs_proxy.title, sections=[
+                    Section(section_title=s["section_title"], description_prompt=s["description_prompt"]) for s in rs_proxy.sections
+                ])
+            except Exception as e:
+                logger.error(f"构造 ReportStructure 失败: {e}")
+                return Message(content=f"构造报告结构失败: {e}", role=self.profile)
+
             # 执行任务计划创建
-            task_plan = await todo.run(report_structure)
-            
-            # 创建包含TaskPlan的消息，供WriterExpert使用
+            task_plan = await todo.run(rs)
             msg = Message(
                 content=f"任务计划创建完成，共{len(task_plan.tasks)}个任务",
                 role=self.profile,
                 cause_by=type(todo),
                 instruct_content=task_plan
             )
-            
             logger.info(f"ProjectManager完成任务规划，任务数量: {len(task_plan.tasks)}")
             return msg
         

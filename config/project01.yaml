@@ -5,20 +5,19 @@
 
 # 项目基本信息（对应architect_action.py中的8个字段）
 project_info:
-  project_name: "睢阳区李口镇农村公益事业财政奖补项目"
-  project_type: "财政支出项目"
-  budget_amount: "888,956.76元"
-  implementation_period: "2025年1月-2025年4月"
-  target_beneficiaries: "贾杨楼村、温堂村、贾关庄村、小吴庄村等农村居民"
+  project_name: "陶丘市睢阳区李口镇人民政府睢阳区李口镇农村公益事业财政奖补项目(温堂村、贾杨楼村)"
+  project_type: "公益事业财政奖补项目"
+  budget_amount: "2160000元"
+  implementation_period: "开工时间：2024年11月21日；峻工时间：2024年12月21日"
+  target_beneficiaries: "贾杨楼村、温堂村"
+  province: "河南省"
+  city: "商丘市"
+  county: "睢阳区"
+  project_description: "项目立项以提升农村居民生活质量、促进城乡基本公共服务均等化为核心目标，重点支持村级道路硬化、公共照明配套等公益性基础设施建设。项目覆盖李口镇下辖贾杨楼村、温堂村，致力于解决群众反映强烈的出行难问题，增强村民获得感与满意度"
   main_objectives:
     - "改善农村基础设施建设"
     - "提升村民出行便利性"
     - "促进农村经济发展"
-    - "美化农村环境"
-  key_activities:
-    - "C30水泥混凝土道路建设"
-    - "村庄绿化工程（栾树、海棠、樱花、红叶李等）"
-    - "基础设施配套完善"
   performance_focus: "社会效益、经济效益、生态效益"
 
 # 文件路径配置
@@ -44,4 +43,5 @@ workspace:
   vector_storage_path: "workspace/project01/vector_storage"
 
 # 用户消息配置（用于模拟chainlit输入）
-user_message: "根据上传的[陶丘市睢阳区李口镇人民政府睢阳区李口镇农村公益事业财政奖补项目]相关文档，设计该项目的财政重点绩效评价报告，重点关注绩效指标决策,过程,产出,效益的完整体系设计"
+user_message_sop1: "请基于本项目资料，设计完整可评分的绩效指标体系，并完成各个指标的评价意见与评分。"
+user_message_sop2: "请基于已完成的指标体系表、撰写报告章节内容，严格按照 report_structure.md 的顺序生成。"

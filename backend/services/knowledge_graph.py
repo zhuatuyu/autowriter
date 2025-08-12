@@ -30,7 +30,12 @@ from metagpt.config2 import Config
 from pathlib import Path
 
 # 配置驱动
-from backend.config.performance_config import PerformanceConfig
+from backend.config.global_prompts import (
+    QUERY_INTENT_MAPPING,
+    KG_CONF,
+    KG_ENTITY_TYPES,
+    KG_RELATION_TYPES,
+)
 
 
 class PerformanceKnowledgeGraph:
@@ -39,24 +44,10 @@ class PerformanceKnowledgeGraph:
     def __init__(self):
         self._kg_index = None
         self._kg_storage_path = "workspace/vector_storage/global_graph"
-        
-        # 🎯 绩效分析报告领域的实体/关系 - 优先读取配置，缺失时回退到内置默认
-        configured_entity_types = PerformanceConfig.get_entity_types() or {}
-        self.entity_types = configured_entity_types if configured_entity_types else {
-            "项目": ["项目名称", "项目类型", "实施地点", "资金规模"],
-            "指标体系": ["决策指标", "过程指标", "产出指标", "效益指标"],
-            "具体指标": ["指标名称", "计算方法", "目标值", "权重"],
-            "政策法规": ["法规名称", "适用范围", "发布机构", "生效时间"],
-            "最佳实践": ["实践名称", "适用场景", "实施要点", "预期效果"],
-            "问题案例": ["问题类型", "原因分析", "解决方案", "改进建议"],
-            "行业类型": ["基础设施", "公益事业", "民生保障", "环境治理"],
-        }
-
-        configured_relation_types = PerformanceConfig.get_relation_types() or []
-        self.relation_types = configured_relation_types if configured_relation_types else [
-            "包含", "属于", "适用于", "遵循", "参考",
-            "导致", "解决", "改进", "关联", "影响"
-        ]
+        # 🎯 绩效分析报告领域的实体/关系（常量化默认集）
+        # 从全局常量读取（可在 global_prompts 中调整）
+        self.entity_types = KG_ENTITY_TYPES
+        self.relation_types = KG_RELATION_TYPES
     
     async def build_knowledge_graph(self, project_vector_storage_path: str) -> bool:
         """
@@ -146,22 +137,7 @@ class PerformanceKnowledgeGraph:
             retriever_mode = "keyword"
             response_mode = "tree_summarize"
             similarity_top_k_cfg = max_knowledge_sequence
-            try:
-                cfg = PerformanceConfig.get_intelligent_search_config() or {}
-                profiles = cfg.get("kg_profiles") or {}
-                # 依据意图推断策略（在 _enhance_domain_query 使用的相同意图分析）
-                intents = self._analyze_intents_by_config(query)
-                profile_key = intents[0] if intents else None
-                profile = profiles.get(profile_key) if profile_key else None
-                if isinstance(profile, dict):
-                    retriever_mode = profile.get("retriever_mode", retriever_mode)
-                    response_mode = profile.get("response_mode", response_mode)
-                    try:
-                        similarity_top_k_cfg = int(profile.get("similarity_top_k", similarity_top_k_cfg))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # 简化：使用默认 retriever/response 配置，可按需要扩展
 
 
             kg_query_engine = self._kg_index.as_query_engine(
@@ -176,15 +152,14 @@ class PerformanceKnowledgeGraph:
             enhanced_query = await self._enhance_domain_query(query)
 
             # 🚦 增强后再次限词（可配置），避免增强文本引入过多关键词导致KG冗长推理
+            # 从全局配置读取增强后限词策略
             try:
-                cfg = PerformanceConfig.get_intelligent_search_config() or {}
-                kg_cfg = (cfg.get("knowledge_graph") or {}) if isinstance(cfg, dict) else {}
-                limit_after = bool(kg_cfg.get("limit_keywords_after_enhance", True))
-                max_after = int(kg_cfg.get("max_keywords_after_enhance", 5))
-                if limit_after and max_after > 0:
-                    enhanced_query = self._limit_keywords_in_text(enhanced_query, max_after)
+                limit_after = bool(KG_CONF.get("limit_keywords_after_enhance", True))
+                max_after = int(KG_CONF.get("max_keywords_after_enhance", 5))
             except Exception:
-                pass
+                limit_after, max_after = True, 5
+            if limit_after and max_after > 0:
+                enhanced_query = self._limit_keywords_in_text(enhanced_query, max_after)
             
             # 执行查询
             response = await kg_query_engine.aquery(enhanced_query)
@@ -226,8 +201,7 @@ class PerformanceKnowledgeGraph:
     def _analyze_intents_by_config(self, query: str) -> List[str]:
         """根据配置的意图关键词映射分析查询意图"""
         try:
-            cfg = PerformanceConfig.get_intelligent_search_config() or {}
-            mapping: Dict[str, List[str]] = cfg.get("query_intent_mapping", {})
+            mapping: Dict[str, List[str]] = QUERY_INTENT_MAPPING or {}
             matched: List[str] = []
             q = query or ""
             for intent, keywords in mapping.items():
@@ -325,8 +299,7 @@ class PerformanceKnowledgeGraph:
         使用config2.yaml中的knowledge_graph配置
         """
         import yaml
-        
-        # 直接读取YAML文件来获取knowledge_graph配置
+        # 只读取我们应用侧的 config/config2.yaml，避免 example/MetaGPT_bak 生效
         with open('config/config2.yaml', 'r', encoding='utf-8') as f:
             yaml_config = yaml.safe_load(f)
         

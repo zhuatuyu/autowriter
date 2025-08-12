@@ -20,9 +20,9 @@ from metagpt.schema import Message
 from metagpt.utils.project_repo import ProjectRepo
 
 from backend.roles.product_manager import ProductManager
-from backend.roles.architect import Architect
+from backend.roles.architect_content import ArchitectContent as Architect
 from backend.roles.project_manager import ProjectManager as PM
-from backend.roles.writer_expert import WriterExpert
+from backend.roles.section_writer import SectionWriter as WriterExpert
 from backend.roles.custom_team_leader import CustomTeamLeader
 
 

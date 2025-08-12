@@ -1,18 +1,20 @@
 #!/usr/bin/env python
 """
-写作专家Action集合 - 内容生成和整合
+写作专家Action集合 - 内容生成和整合（SOP2 章节写作）
 """
 import pandas as pd
 from pathlib import Path
 from metagpt.actions import Action
 from metagpt.logs import logger
 from backend.services.intelligent_search import intelligent_search
-from backend.config.performance_constants import (
-    ENV_WRITER_BASE_SYSTEM,
-    ENV_SECTION_WRITING_PROMPT,
+from backend.config.writer_prompts import (
+    WRITER_BASE_SYSTEM as ENV_WRITER_BASE_SYSTEM,
+    SECTION_WRITING_PROMPT as ENV_SECTION_WRITING_PROMPT,
 )
 from backend.tools.json_utils import extract_json_from_llm_response
-from .pm_action import Task
+from backend.tools.project_info import get_project_info_text
+from .project_manager_action import Task
+
 
 class WriteSection(Action):
     """
@@ -70,8 +72,6 @@ class WriteSection(Action):
     async def _retrieve_factual_basis(self, task: Task, vector_store_path: str) -> str:
         """🧠 使用智能检索服务检索相关的事实依据"""
         try:
-            
-            
             # 🧠 构建更智能的检索查询 - 结合章节标题和写作要求
             search_query = f"{task.section_title} {task.instruction[:200]}"
             
@@ -138,20 +138,9 @@ class WriteSection(Action):
     async def _generate_content(self, prompt: str) -> str:
         """生成章节内容"""
         # 使用LLM生成内容
-        section_content = await self._aask(prompt, [ENV_WRITER_BASE_SYSTEM])
+        # 注入项目配置信息作为系统级提示
+        project_info_text = get_project_info_text()
+        section_content = await self._aask(prompt, [ENV_WRITER_BASE_SYSTEM, project_info_text])
         return section_content
 
-
-class IntegrateReport:  # 占位，防止外部误用旧路径
-    def __init__(self, *_, **__):
-        raise ImportError(
-            "IntegrateReport 已迁移至 backend.actions.integrate_action.IntegrateReport，请调整导入路径"
-        )
-
-
-class EvaluateMetrics:  # 占位，防止外部误用旧路径
-    def __init__(self, *_, **__):
-        raise ImportError(
-            "EvaluateMetrics 已迁移至 backend.actions.metric_action.EvaluateMetrics，请调整导入路径"
-        )
 

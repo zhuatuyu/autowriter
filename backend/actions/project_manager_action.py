@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """
-项目经理Action集合 - 任务规划和调度
+项目经理Action集合 - 任务规划和调度（SOP PM 动作）
 """
 from typing import List
 from pydantic import BaseModel, Field
 from metagpt.actions import Action
 from metagpt.logs import logger
 
-from .architect_action import ReportStructure
+from .architect_content_action import ReportStructure
 
 
 class Task(BaseModel):
@@ -48,3 +48,5 @@ class CreateTaskPlan(Action):
         logger.info(f"任务计划创建完成，共 {len(tasks)} 个任务")
         
         return task_plan
+
+

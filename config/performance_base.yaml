@@ -1,0 +1,144 @@
+# 通用基座配置（SOP1/2共享）
+domain_info:
+  name: "绩效分析报告"
+  description: "财政项目绩效评价报告生成系统"
+  version: "3.1-base"
+
+intelligent_search:
+  query_intent_mapping:
+    reasoning: ["因果","关系","推理","证据链","三元组","图谱","关联推断","路径","上下游","链路"]
+    policy: ["政策","法规","法条","条款","规范","标准","办法","通知","指导意见","依据"]
+    method: ["方法","模型","步骤","流程","算法","框架","AHP","评价方法"]
+    case: ["案例","实践","复盘","经验","对标","标杆"]
+    metric: ["指标","指标体系","KPI","KRI","评价点","评分方法"]
+    performance: ["绩效评价","评分规则","计分方法","评价标准","权重设定"]
+  search_mode_weights:
+    vector: 0.6
+    knowledge_graph: 0.4
+  top_k:
+    global_top_k: 4
+    project_top_k: 2
+  knowledge_graph:
+    max_keywords: 5
+    limit_keywords_after_enhance: true
+    max_keywords_after_enhance: 5
+  url_whitelist:
+    suffix: [".gov.cn", ".edu.cn"]
+    hosts: ["henan.gov.cn", "czt.henan.gov.cn", "ggzyjy.shangqiu.gov.cn", "ccgp-henan.gov.cn"]
+
+llm_limits:
+  max_input_tokens: 120000
+
+
+# 领域与全局共享：知识图谱与评价基础配置
+knowledge_graph:
+  entity_types:
+    政策法规:
+      - 法规名称
+      - 适用范围
+      - 发布机构
+      - 生效时间
+      - 关键条款
+      - 引用标准
+    方法论:
+      - 方法名称
+      - 适用场景
+      - 步骤清单
+      - 评价模型
+      - 样例
+    最佳实践:
+      - 实践名称
+      - 行业场景
+      - 实施要点
+      - 达成效果
+      - 参考报告ID
+    项目案例:
+      - 项目名称
+      - 地区
+      - 年度
+      - 资金规模
+      - 主要内容
+      - 产出
+      - 效益
+  relation_types:
+    - "包含"
+    - "属于"
+    - "适用于"
+    - "遵循"
+    - "参考"
+    - "导致"
+    - "解决"
+    - "改进"
+    - "关联"
+    - "影响"
+
+evaluation_standards:
+evaluation_types:
+  element_count:
+    description: "根据各要素符合情况计分"
+    scoring_guidance: |
+      1) 从事实中识别符合要素；2) 根据规则折算分值；3) 求和得到分数
+    opinion_requirements: |
+      - 列出各要素的符合/不符合情况；引用依据；不写最终结论
+  formula:
+    description: "公式计算得分"
+    scoring_guidance: |
+      1) 明确公式；2) 提取数据；3) 代入计算并换算到100分制
+    opinion_requirements: |
+      - 给出数据来源与完整计算过程
+  condition:
+    description: "条件判断计分"
+    scoring_guidance: |
+      1) 匹配满足的档次；2) 取其对应分数
+    opinion_requirements: |
+      - 逐条说明满足/不满足与证据
+  qual_quant:
+    description: "定性与定量结合"
+    scoring_guidance: |
+      1) 分别计算定量与定性；2) 按权重合成
+    opinion_requirements: |
+      - 给出定量数据与定性依据
+  deduction:
+    description: "递减扣分"
+    scoring_guidance: |
+      1) 从满分开始；2) 按问题数量/严重度扣减
+    opinion_requirements: |
+      - 罗列问题、扣分规则与证据
+  likert:
+    description: "李克特量表法"
+    scoring_guidance: |
+      1) 按满意度百分比或档次映射得分
+    opinion_requirements: |
+      - 说明调查方法、样本量、统计过程
+      
+  score_levels:
+    优秀:
+      min: 90
+      max: 100
+      description: "项目实施非常成功，各项指标均达到或超过预期"
+    良好:
+      min: 80
+      max: 89
+      description: "项目实施比较成功，主要指标达到预期"
+    一般:
+      min: 70
+      max: 79
+      description: "项目基本完成，但部分指标有待改进"
+    及格:
+      min: 60
+      max: 69
+      description: "项目勉强完成，存在较多问题"
+    较差:
+      min: 0
+      max: 59
+      description: "项目实施效果不佳，需要重大改进"
+  dimension_weights:
+    决策: 20
+    过程: 25
+    产出: 30
+    效益: 25
+  level1_indicators:
+    - "决策"
+    - "过程"
+    - "产出"
+    - "效益"

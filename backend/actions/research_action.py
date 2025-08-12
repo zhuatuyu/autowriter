@@ -21,19 +21,23 @@ from metagpt.tools.web_browser_engine import WebBrowserEngine
 from metagpt.utils.project_repo import ProjectRepo
 from metagpt.utils.common import OutputParser
 from backend.tools.search_utils import normalize_keywords
-from backend.config.performance_constants import (
-    ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM,
-    ENV_RESEARCH_TOPIC_SYSTEM,
-    ENV_SEARCH_KEYWORDS_PROMPT,
-    ENV_DECOMPOSE_RESEARCH_PROMPT,
-    ENV_RANK_URLS_PROMPT,
-    ENV_WEB_CONTENT_ANALYSIS_PROMPT,
-    ENV_GENERATE_RESEARCH_BRIEF_PROMPT,
-    ENV_ENHANCEMENT_QUERIES,
-    ENV_RESEARCH_DECOMPOSITION_NUMS,
-    ENV_RESEARCH_URLS_PER_QUERY,
-    ENV_FALLBACK_KEYWORDS,
-    ENV_MAX_INPUT_TOKENS,
+from backend.tools.json_utils import extract_json_from_llm_response
+from backend.tools.project_info import get_project_info_text
+from backend.config.research_prompts import (
+    COMPREHENSIVE_RESEARCH_BASE_SYSTEM as ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM,
+    RESEARCH_TOPIC_SYSTEM as ENV_RESEARCH_TOPIC_SYSTEM,
+    SEARCH_KEYWORDS_PROMPT as ENV_SEARCH_KEYWORDS_PROMPT,
+    DECOMPOSE_RESEARCH_PROMPT as ENV_DECOMPOSE_RESEARCH_PROMPT,
+    RANK_URLS_PROMPT as ENV_RANK_URLS_PROMPT,
+    WEB_CONTENT_ANALYSIS_PROMPT as ENV_WEB_CONTENT_ANALYSIS_PROMPT,
+    select_generate_research_brief_prompt,
+    ENHANCEMENT_QUERIES as ENV_ENHANCEMENT_QUERIES,
+    RESEARCH_DECOMPOSITION_NUMS as ENV_RESEARCH_DECOMPOSITION_NUMS,
+    RESEARCH_URLS_PER_QUERY as ENV_RESEARCH_URLS_PER_QUERY,
+    FALLBACK_KEYWORDS as ENV_FALLBACK_KEYWORDS,
+    MAX_INPUT_TOKENS as ENV_MAX_INPUT_TOKENS,
+    METRIC_DECOMPOSITION_DIMENSIONS as ENV_METRIC_DECOMPOSITION_DIMENSIONS,
+    SECTION_DECOMPOSITION_DIMENSIONS as ENV_SECTION_DECOMPOSITION_DIMENSIONS,
 )
 
 # MetaGPT 原生 RAG 组件 - 强制使用，不再提供简化版本
@@ -119,11 +123,20 @@ class ConductComprehensiveResearch(Action):
             logger.info("✅ 统一检索服务已准备就绪。")
         
         # 2. 网络研究 (如果有项目知识库，将用于RAG增强)
+        # SOP 推断：用于控制问题分解是否走指标维度
+        sop = "sop1"
+        try:
+            if project_repo and "sop2" in str(project_repo.workdir).lower():
+                sop = "sop2"
+        except Exception:
+            pass
+
         online_research_content = await self._conduct_online_research(
             topic, 
             decomposition_nums, 
             url_per_query,
-            project_vector_path=vector_store_path  # 传递项目知识库路径用于RAG增强
+            project_vector_path=vector_store_path,  # 传递项目知识库路径用于RAG增强
+            sop=sop
         )
 
         # 3. 将网络研究内容也添加到项目知识库（实现共建共享）
@@ -181,7 +194,15 @@ class ConductComprehensiveResearch(Action):
             pass
 
         # 使用安全占位符替换，避免 JSON 花括号与 str.format 冲突导致 KeyError
-        prompt_template = ENV_GENERATE_RESEARCH_BRIEF_PROMPT
+        # 基于SOP选择不同的扁平化研究简报模板（默认sop1）
+        sop = "sop1"
+        try:
+            # 从项目路径推断或未来从env/flag注入
+            if project_repo and "sop2" in str(project_repo.workdir).lower():
+                sop = "sop2"
+        except Exception:
+            pass
+        prompt_template = select_generate_research_brief_prompt(sop)
         time_stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         prompt = (
             prompt_template
@@ -193,7 +214,9 @@ class ConductComprehensiveResearch(Action):
         )
         # 防止超长输入触发底层提供商长度限制：截断到安全长度
         safe_prompt = prompt[:ENV_MAX_INPUT_TOKENS]
-        brief = await self._aask(safe_prompt, [ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM])
+        # 注入项目配置信息作为系统级提示，统一对齐上下文
+        project_info_text = get_project_info_text()
+        brief = await self._aask(safe_prompt, [ENV_COMPREHENSIVE_RESEARCH_BASE_SYSTEM, project_info_text])
         
         logger.info(f"研究简报生成完毕。")
 
@@ -339,7 +362,7 @@ class ConductComprehensiveResearch(Action):
             logger.warning(f"⚠️ 智能检索增强失败: {e}")
             return combined_content
     
-    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, project_vector_path: str = "") -> str:
+    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, project_vector_path: str = "", sop: str = "sop1") -> str:
         """执行在线研究"""
         if not self.search_engine:
             logger.error("❌ 搜索引擎未初始化！无法进行在线研究")
@@ -362,9 +385,16 @@ class ConductComprehensiveResearch(Action):
         
         # 添加LLM调用后的延迟，避免频率限制
         await asyncio.sleep(1)
-        
+
+        # 使用统一JSON提取工具，兼容代码块/包裹文本/非严格JSON
         try:
-            raw_keywords = OutputParser.extract_struct(keywords_str, list)
+            parsed = extract_json_from_llm_response(keywords_str)
+            if isinstance(parsed, list):
+                raw_keywords = parsed
+            elif isinstance(parsed, dict):
+                raw_keywords = parsed.get('keywords', []) or list(parsed.values())
+            else:
+                raise ValueError('parsed keywords not list/dict')
         except Exception as e:
             logger.warning(f"⚠️ 关键词解析失败，使用回退关键词: {e}")
             raw_keywords = ENV_FALLBACK_KEYWORDS or [topic[:50]]
@@ -419,24 +449,51 @@ class ConductComprehensiveResearch(Action):
         combined_search_results = search_results_str + rag_results_str
 
         logger.info("步骤 2: 分解研究问题")
-        decompose_prompt = ENV_DECOMPOSE_RESEARCH_PROMPT.format(
-            decomposition_nums=decomposition_nums,
-            url_per_query=url_per_query,
-            search_results=combined_search_results
-        )
-        queries_str = await self._aask(
-            decompose_prompt[:ENV_MAX_INPUT_TOKENS],
-            [keywords_prompt[:ENV_MAX_INPUT_TOKENS]]
-        )
-        
-        # 添加LLM调用后的延迟，避免频率限制
-        await asyncio.sleep(1)
-        try:
-            queries = OutputParser.extract_struct(queries_str, list)
-        except Exception as e:
-            logger.warning(f"问题分解失败: {e}, 使用关键词作为问题")
-            queries = keywords
-        
+        # 指标构建（SOP1）场景：按 METRIC_DECOMPOSITION_DIMENSIONS 生成维度化的子问题
+        if (sop or "sop1").lower() == "sop1" and ENV_METRIC_DECOMPOSITION_DIMENSIONS:
+            # 将维度转为指导性子问题，数量仍受 decomposition_nums 约束
+            dims = ENV_METRIC_DECOMPOSITION_DIMENSIONS[:max(1, decomposition_nums)]
+            dim_queries = [f"围绕‘{d}’提出一个与主题‘{topic}’强相关且可检索的具体问题" for d in dims]
+            # 直接作为 queries（跳过LLM再次分解，显著提升稳定性与速度）
+            queries = dim_queries
+        # 章节写作（SOP2）场景：按 SECTION_DECOMPOSITION_DIMENSIONS 生成与章节侧对齐的子问题
+        elif (sop or "sop1").lower() == "sop2" and ENV_SECTION_DECOMPOSITION_DIMENSIONS:
+            dims = ENV_SECTION_DECOMPOSITION_DIMENSIONS[:max(1, decomposition_nums)]
+            queries = [f"围绕‘{d}’为主题‘{topic}’收集高质量证据与权威引用的具体问题" for d in dims]
+        else:
+            decompose_prompt = ENV_DECOMPOSE_RESEARCH_PROMPT.format(
+                decomposition_nums=decomposition_nums,
+                url_per_query=url_per_query,
+                search_results=combined_search_results
+            )
+            # 注入项目配置信息作为系统级提示
+            project_info_text = get_project_info_text()
+            queries_str = await self._aask(
+                decompose_prompt[:ENV_MAX_INPUT_TOKENS],
+                [keywords_prompt[:ENV_MAX_INPUT_TOKENS], project_info_text]
+            )
+            
+            # 添加LLM调用后的延迟，避免频率限制
+            await asyncio.sleep(1)
+            # 统一使用通用JSON解析，兼容代码块/字典/列表
+            try:
+                parsed = extract_json_from_llm_response(queries_str)
+                if isinstance(parsed, list):
+                    queries = parsed
+                elif isinstance(parsed, dict):
+                    # 常见键名兜底
+                    for key in ("queries", "questions", "items"):
+                        if key in parsed and isinstance(parsed[key], list):
+                            queries = parsed[key]
+                            break
+                    else:
+                        # 将字典值中可用的字符串收集
+                        queries = [v for v in parsed.values() if isinstance(v, str) and v.strip()]
+                else:
+                    raise ValueError("parsed queries not list/dict")
+            except Exception as e:
+                logger.warning(f"问题分解失败: {e}, 使用关键词作为问题")
+                queries = keywords
         logger.info(f"研究问题: {queries}")
 
         # 串行处理每个问题，避免并发搜索
@@ -500,7 +557,9 @@ class ConductComprehensiveResearch(Action):
         
         logger.debug(f"URL排序提示词: {prompt}")  # 添加调试日志
         
-        indices_str = await self._aask(prompt[:ENV_MAX_INPUT_TOKENS])
+        # 注入项目配置信息作为系统级提示
+        project_info_text = get_project_info_text()
+        indices_str = await self._aask(prompt[:ENV_MAX_INPUT_TOKENS], [project_info_text])
         
         # 添加LLM调用后的延迟，避免频率限制
         await asyncio.sleep(0.5)
@@ -524,17 +583,12 @@ class ConductComprehensiveResearch(Action):
                     host = urlparse(url).netloc.lower()
                     if not host:
                         return False
-                    # 从配置读取白名单
-                    from backend.config.performance_config import PerformanceConfig
-                    i_cfg = PerformanceConfig.get_intelligent_search_config() or {}
-                    wl = i_cfg.get("url_whitelist", {}) if isinstance(i_cfg, dict) else {}
-                    suffixes = wl.get("suffix", []) or []
-                    hosts = wl.get("hosts", []) or []
-                    # 后缀规则
+                    from backend.config.global_prompts import URL_WHITELIST
+                    suffixes = URL_WHITELIST.get("suffix", []) or []
+                    hosts = URL_WHITELIST.get("hosts", []) or []
                     for suf in suffixes:
                         if host.endswith(suf.lower()):
                             return True
-                    # 精确主机规则
                     if host in {h.lower() for h in hosts}:
                         return True
                     return False
@@ -554,7 +608,9 @@ class ConductComprehensiveResearch(Action):
         try:
             content = await WebBrowserEngine().run(url)
             prompt = ENV_WEB_CONTENT_ANALYSIS_PROMPT.format(content=content, query=query)
-            summary = await self._aask(prompt[:ENV_MAX_INPUT_TOKENS])
+            # 注入项目配置信息作为系统级提示
+            project_info_text = get_project_info_text()
+            summary = await self._aask(prompt[:ENV_MAX_INPUT_TOKENS], [project_info_text])
             
             # 添加LLM调用后的延迟，避免频率限制
             await asyncio.sleep(1)

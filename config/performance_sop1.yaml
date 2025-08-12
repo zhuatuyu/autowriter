@@ -1,0 +1,145 @@
+# SOP1 覆盖配置：指标体系与评分
+prompts:
+  metrics_design: |
+    你是绩效评价指标体系的架构师。请为本项目设计一套完整的绩效评价指标体系。
+    要求：
+    - 一级指标固定：决策、过程、产出、效益（可在weight中体现分值权重）
+    - 每个一级指标下设置2-3个具体指标
+    - 评价类型从以下6种中选择（仅英文枚举）：element_count, formula, condition, qual_quant, deduction, likert
+    - 输出仅允许JSON数组，每个元素为一个指标对象，字段固定且仅允许以下英文键：
+      [metric_id, level1_name, level2_name, name, weight, evaluation_type, evaluation_points, scoring_method, opinion, score]
+    - 约束：
+      - metric_id: 英文蛇形唯一ID，如 decision_policy_compliance
+      - level1_name/level2_name/name: 中文名称
+      - weight: 数值
+      - evaluation_type: 上述6种英文之一
+      - evaluation_points: 字符串数组
+      - scoring_method: 文本
+      - opinion: 文本（写作时作为“评分过程/要点”参考）
+      - score: 初始为 0
+
+  research:
+    generate_research_brief_prompt: |
+      【输出格式硬性约束 - 仅输出JSON（扁平结构）】
+      - 你必须仅输出一个 JSON 对象，键严格为：
+        ["topic","generated_at","kb_sources","overview","conclusion","achievements","problems","suggestions","metric_focus","policy_refs","method_refs","case_refs"]。
+      - 字段说明：
+        - topic: 研究主题（string）
+        - generated_at: 时间戳（ISO8601 string）
+        - kb_sources: ["global_kg","project_vector","web"] 的子集（array[string]）
+        - overview: 项目与研究要点综述（string）
+        - conclusion: 综合结论（string）
+        - achievements: 主要成效（string）
+        - problems: 存在问题（string，要求对齐“扣分项倾向”）
+        - suggestions: 改进建议（string，面向指标优化）
+        - metric_focus: 指标体系设计建议要点（string，强调评价类型/要点/计分方法）
+        - policy_refs: 重要政策/法规引用（string，引用自白名单来源）
+        - method_refs: 方法论与计分模型引用（string）
+        - case_refs: 对标案例与指标体系摘要（string）
+
+      【引用来源硬约束（禁用非白名单/示例链接）】
+      - allowed_web_urls: {allowed_web_urls}
+      - allowed_project_docs: {allowed_project_docs}
+      - 仅允许引用上述白名单来源；不得出现 example.com 等非白名单域。
+      - web 证据必须引用 allowed_web_urls 之一；项目文档使用文件名；全局KG仅允许关系/三元组文字描述，不得生成URL。
+      - 如确无证据，输出“信息待补充”。
+
+      【写作重点（SOP1侧重指标体系）】
+      - 结论与建议要为后续“指标体系设计与统一评价”直接服务：
+        强调四类（决策/过程/产出/效益）的关键关注点、典型评价要点与计分方法路径；
+        标注证据位置，避免空泛；
+        明确适用的评价类型（element_count/formula/condition/qual_quant/deduction/likert）的场景指引。
+
+      【仅输出JSON示例】
+      {{
+        "topic": "{topic}",
+        "generated_at": "{time_stamp}",
+        "kb_sources": ["global_kg","project_vector","web"],
+        "overview": "...",
+        "conclusion": "...",
+        "achievements": "...",
+        "problems": "...",
+        "suggestions": "...",
+        "metric_focus": "...",
+        "policy_refs": "...",
+        "method_refs": "...",
+        "case_refs": "..."
+      }}
+
+research_settings:
+  decomposition_nums: 2
+  url_per_query: 3
+
+evaluator:
+  evaluator_base_system: |
+    你是绩效指标统一评价专家。你的目标是：
+    1. 基于检索到的事实依据，对每个指标进行客观评价与计分
+    2. 严格遵循指标的评价类型与计分方法
+    3. 仅输出结构化 JSON，保证 score/opinion 可被程序解析
+  evaluation_prompt_template: |
+    【格式硬性约束 - 仅输出JSON】
+    - 你必须仅输出一个 JSON 对象，且键严格为：score(float) 与 opinion(string)。
+    - 禁止输出任何额外文字、说明、Markdown、代码块围栏（```）或前后缀。
+    - 若无法完全确定分数，也必须输出形如 {"score": 0, "opinion": "..."} 的JSON。
+
+    请基于以下事实依据，对指标进行“{evaluation_type}”方式的专业评价与计分。
+
+    【评价要点】
+    {evaluation_points}
+
+    【事实依据（RAG检索）】
+    {facts}
+
+    【评分方法】
+    {scoring_method}
+
+    【类型说明】
+    {type_description}
+
+    【评分指导】
+    {scoring_guidance}
+
+    【评价意见撰写要求】
+    {opinion_requirements}
+
+    请严格按照“{evaluation_type}”的规则执行，返回JSON：
+    {{
+      "score": 80.0,
+      "opinion": "……不包含最终结论性措辞，仅呈现评价依据与过程。"
+    }}
+
+    【再次强调 - 仅输出JSON】
+    - 最终回复只允许包含上述 JSON 对象；不得包含除 JSON 外的任何字符。
+
+  # 指标级提示词组合规范（控制评价要点与评分方法如何呈现）
+  metric_prompt_spec:
+    default:
+      points_intro: "评价要点："
+      point_bullet: "- "
+      scoring_method_intro: "评分方法："
+      max_points: 10
+    by_evaluation_type:
+      element_count:
+        points_intro: "评价要素："
+        point_bullet: "- "
+        scoring_method_intro: "计分规则："
+      formula:
+        points_intro: "计算要求："
+        point_bullet: "- "
+        scoring_method_intro: "计算方法："
+      condition:
+        points_intro: "判断条件："
+        point_bullet: "- "
+        scoring_method_intro: "判定标准："
+      qual_quant:
+        points_intro: "评价要求："
+        point_bullet: "- "
+        scoring_method_intro: "权重与合成方法："
+      deduction:
+        points_intro: "扣分标准："
+        point_bullet: "- "
+        scoring_method_intro: "扣分方法："
+      likert:
+        points_intro: "调查要求："
+        point_bullet: "- "
+        scoring_method_intro: "得分计算方法："

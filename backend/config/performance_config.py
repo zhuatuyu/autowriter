@@ -10,20 +10,69 @@ class PerformanceConfig:
     
     _config = None
     _config_path = "config/performance_config.yaml"
+    _base_config_path = None
+
+    @classmethod
+    def _deep_merge(cls, base: dict, override: dict) -> dict:
+        """深度合并两个dict，override优先。"""
+        if not isinstance(base, dict):
+            return override
+        result = dict(base)
+        for k, v in (override or {}).items():
+            if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                result[k] = cls._deep_merge(result[k], v)
+            else:
+                result[k] = v
+        return result
+
+    @classmethod
+    def set_config_paths(cls, base_path: str | None, overlay_path: str | None):
+        """显式设置基础配置与覆盖配置路径（后者优先）。"""
+        cls._base_config_path = base_path
+        if overlay_path:
+            cls._config_path = overlay_path
+        elif base_path:
+            cls._config_path = base_path
+        cls._config = None
     
     @classmethod
     def _load_config(cls):
         """加载配置文件"""
         if cls._config is None:
             try:
-                config_file = Path(cls._config_path)
-                if not config_file.exists():
-                    raise FileNotFoundError(f"配置文件不存在: {cls._config_path}")
-                
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    cls._config = yaml.safe_load(f)
-                
-                logger.info(f"✅ 业务配置加载成功: {cls._config_path}")
+                import os
+                # 支持通过环境变量设置 base/overlay 路径
+                env_base = os.environ.get("PERF_CONFIG_BASE")
+                env_overlay = os.environ.get("PERF_CONFIG_OVERLAY")
+                if env_base or env_overlay:
+                    cls._base_config_path = env_base or cls._base_config_path
+                    if env_overlay:
+                        cls._config_path = env_overlay
+
+                # 读取基础配置
+                base_cfg = {}
+                base_path = cls._base_config_path or "config/performance_config.yaml"
+                base_file = Path(base_path)
+                if base_file.exists():
+                    with open(base_file, 'r', encoding='utf-8') as bf:
+                        base_cfg = yaml.safe_load(bf) or {}
+                else:
+                    # 若基础文件不存在且overlay就是默认路径，则强校验默认配置存在
+                    if cls._config_path == base_path and not base_file.exists():
+                        raise FileNotFoundError(f"配置文件不存在: {base_path}")
+
+                # 读取覆盖配置
+                overlay_cfg = {}
+                overlay_file = Path(cls._config_path)
+                if overlay_file.exists():
+                    with open(overlay_file, 'r', encoding='utf-8') as of:
+                        overlay_cfg = yaml.safe_load(of) or {}
+
+                # 合并
+                cls._config = cls._deep_merge(base_cfg, overlay_cfg)
+                logger.info(
+                    f"✅ 业务配置加载成功: base='{base_path}' overlay='{cls._config_path if overlay_cfg else ''}'"
+                )
             except Exception as e:
                 logger.error(f"❌ 业务配置加载失败: {e}")
                 raise
@@ -96,19 +145,21 @@ class PerformanceConfig:
     def get_evaluation_standards(cls) -> Dict[str, Any]:
         """获取评价标准配置"""
         cls._load_config()
-        return cls._config.get('evaluation_standards', {})
+        cfg = cls._config or {}
+        val = cfg.get('evaluation_standards')
+        return val if isinstance(val, dict) else {}
     
     @classmethod
     def get_score_levels(cls) -> Dict[str, Dict[str, Any]]:
         """获取评分等级定义"""
-        eval_config = cls.get_evaluation_standards()
-        return eval_config.get('score_levels', {})
+        eval_config = cls.get_evaluation_standards() or {}
+        return eval_config.get('score_levels', {}) if isinstance(eval_config, dict) else {}
     
     @classmethod
     def get_dimension_weights(cls) -> Dict[str, int]:
         """获取维度权重配置"""
-        eval_config = cls.get_evaluation_standards()
-        return eval_config.get('dimension_weights', {})
+        eval_config = cls.get_evaluation_standards() or {}
+        return eval_config.get('dimension_weights', {}) if isinstance(eval_config, dict) else {}
     
     @classmethod
     def get_level1_indicators(cls) -> List[str]:
@@ -139,6 +190,12 @@ class PerformanceConfig:
         """获取写作类提示词配置"""
         prompts = cls.get_prompts()
         return prompts.get('writer', {})
+
+    @classmethod
+    def get_evaluator_prompts(cls) -> Dict[str, str]:
+        """获取评价类提示词配置（SOP1用）"""
+        prompts = cls.get_prompts()
+        return prompts.get('evaluator', {})
 
     @classmethod
     def get_writer_evaluation_prompt_template(cls) -> str:
@@ -217,6 +274,11 @@ class PerformanceConfig:
     def get_writer_prompt(cls, key: str) -> str:
         writer_prompts = cls.get_writer_prompts()
         return writer_prompts.get(key, '')
+
+    @classmethod
+    def get_evaluator_prompt(cls, key: str) -> str:
+        evaluator_prompts = cls.get_evaluator_prompts()
+        return evaluator_prompts.get(key, '')
     
     @classmethod
     def get_fallback_keywords(cls) -> List[Dict[str, Any]]:

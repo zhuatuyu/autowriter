@@ -11,7 +11,8 @@ from pathlib import Path
 from metagpt.schema import Message
 from backend.actions.research_action import ResearchData, ConductComprehensiveResearch, Documents, Document
 from backend.roles.product_manager import ProductManager
-from backend.roles.architect import Architect, DesignReportStructure
+from backend.roles.architect_content import ArchitectContent as Architect
+from backend.actions.architect_content_action import DesignReportStructureOnly as DesignReportStructure
 from backend.actions.robust_search_action import RobustSearchEnhancedQA
 
 

@@ -36,8 +36,8 @@ def extract_json_from_llm_response(response: str) -> Any:
             return [item for item in obj if isinstance(item, dict)]
 
         if isinstance(obj, dict):
-            # 常见列表字段
-            for key in ("metrics", "data", "items", "list", "results"):
+            # 常见列表字段（扩充：包含 performance_metrics）
+            for key in ("metrics", "data", "items", "list", "results", "performance_metrics"):
                 val = obj.get(key)
                 if isinstance(val, list):
                     return [item for item in val if isinstance(item, dict)]

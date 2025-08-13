@@ -9,10 +9,10 @@ from metagpt.logs import logger
 from .hybrid_search import hybrid_search
 from .knowledge_graph import performance_kg
 from backend.config.global_prompts import (
-    QUERY_INTENT_MAPPING as ENV_QUERY_INTENT_MAPPING,
-    SEARCH_MODE_WEIGHTS as ENV_SEARCH_MODE_WEIGHTS,
-    TOP_K as ENV_INTELLIGENT_TOPK,
-    KG_CONF,
+    QUERY_INTENT_MAPPING,  # 查询意图关键词映射（reasoning/policy/method/...）
+    SEARCH_MODE_WEIGHTS,   # 检索模式权重（vector/kg 权重）
+    TOP_K,                 # 智能检索各通道 top_k 配置（global_top_k/project_top_k）
+    KG_CONF,               # 知识图谱关键词限制等配置
 )
 
 
@@ -171,13 +171,13 @@ class IntelligentSearchService:
         tasks = []
         
         # 根据权重与意图选择方法
-        vector_w = float(ENV_SEARCH_MODE_WEIGHTS.get("vector", 0))
-        kg_w = float(ENV_SEARCH_MODE_WEIGHTS.get("knowledge_graph", 0))
+        vector_w = float(SEARCH_MODE_WEIGHTS.get("vector", 0))
+        kg_w = float(SEARCH_MODE_WEIGHTS.get("knowledge_graph", 0))
 
         # 读取可配置的top_k（提供默认值）
         try:
-            global_top_k = int(ENV_INTELLIGENT_TOPK.get("global_top_k", max_results // 2 or 2))
-            project_top_k = int(ENV_INTELLIGENT_TOPK.get("project_top_k", max_results - global_top_k or 4))
+            global_top_k = int(TOP_K.get("global_top_k", max_results // 2 or 2))
+            project_top_k = int(TOP_K.get("project_top_k", max_results - global_top_k or 4))
         except Exception:
             global_top_k, project_top_k = max_results // 2 or 2, max_results - (max_results // 2 or 2)
 
@@ -208,9 +208,9 @@ class IntelligentSearchService:
         return hybrid_result
     
     async def _analyze_query_intent(self, query: str) -> Dict[str, bool]:
-        """🧠 查询意图分析（配置驱动：ENV_QUERY_INTENT_MAPPING）"""
+        """🧠 查询意图分析（配置驱动：QUERY_INTENT_MAPPING）"""
         strategy: Dict[str, bool | str] = {"use_kg": False, "query_type": "general"}
-        mapping: Dict[str, List[str]] = ENV_QUERY_INTENT_MAPPING or {}
+        mapping: Dict[str, List[str]] = QUERY_INTENT_MAPPING or {}
 
         matched_type: Optional[str] = None
         for qtype, keywords in mapping.items():

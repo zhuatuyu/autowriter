@@ -19,7 +19,7 @@ class ProductManager(Role):
     """
     name: str = "产品经理"
     profile: str = "Product Manager"
-    goal: str = "分析用户需求，进行市场和案例研究，输出研究简报"
+    goal: str = "分析用户需求，进行项目相关行业和案例的研究，输出研究简报"
     constraints: str = "必须进行充分的研究，确保简报内容详实、准确"
     _project_repo: object = None  # 使用私有属性避免序列化问题
 

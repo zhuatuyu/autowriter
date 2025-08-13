@@ -44,4 +44,4 @@ workspace:
 
 # 用户消息配置（用于模拟chainlit输入）
 user_message_sop1: "请基于本项目资料，设计完整可评分的绩效指标体系，并完成各个指标的评价意见与评分。"
-user_message_sop2: "请基于已完成的指标体系表、撰写报告章节内容，严格按照 report_structure.md 的顺序生成。"
+user_message_sop2: "请基于已完成的指标体系表、撰写报告章节内容，撰写本项目的绩效评价报告。"

@@ -6,8 +6,8 @@ from metagpt.actions import Action
 from metagpt.logs import logger
 from backend.tools.json_utils import extract_json_from_llm_response
 from backend.config.architect_prompts import (
-    METRICS_DESIGN_PROMPT as ENV_METRICS_DESIGN_PROMPT,
-    ARCHITECT_BASE_SYSTEM as ENV_ARCHITECT_BASE_SYSTEM,
+    METRICS_DESIGN_PROMPT,   # 指标体系设计主提示词（字段规范/枚举/计分规则的生成约束）
+    ARCHITECT_BASE_SYSTEM,   # 架构师系统提示（角色定位与目标）
 )
 
 
@@ -16,10 +16,10 @@ class DesignMetricSystem(Action):
         """
         基于研究简报生成指标体系的标准JSON（list[dict]）。
         """
-        base = ENV_METRICS_DESIGN_PROMPT or "请根据研究简报设计绩效指标体系。"
+        base = METRICS_DESIGN_PROMPT or "请根据研究简报设计绩效指标体系。"
         # 提示词完全配置驱动：YAML 内已给出字段规范/枚举与约束，这里不再在代码层硬编码
         composed = f"研究简报（供参考，不得复制原文）：\n\n{research_brief_text[:6000]}\n\n{base}"
-        resp = await self._aask(composed, [ENV_ARCHITECT_BASE_SYSTEM])
+        resp = await self._aask(composed, [ARCHITECT_BASE_SYSTEM])
         data = extract_json_from_llm_response(resp)
         if isinstance(data, dict) and 'metrics' in data:
             data = data['metrics']

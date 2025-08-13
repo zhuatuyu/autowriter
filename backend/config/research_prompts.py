@@ -1,24 +1,3 @@
-#!/usr/bin/env python
-"""
-研究相关常量（替代 YAML 配置，供 research_action 使用）
-
-用法示例：
-from backend.config.research_prompts import (
-    COMPREHENSIVE_RESEARCH_BASE_SYSTEM,
-    RESEARCH_TOPIC_SYSTEM,
-    SEARCH_KEYWORDS_PROMPT,
-    DECOMPOSE_RESEARCH_PROMPT,
-    RANK_URLS_PROMPT,
-    WEB_CONTENT_ANALYSIS_PROMPT,
-    GENERATE_RESEARCH_BRIEF_PROMPT,
-    ENHANCEMENT_QUERIES,
-    RESEARCH_DECOMPOSITION_NUMS,
-    RESEARCH_URLS_PER_QUERY,
-    FALLBACK_KEYWORDS,
-    MAX_INPUT_TOKENS,
-)
-"""
-
 # 系统级提示
 COMPREHENSIVE_RESEARCH_BASE_SYSTEM = (
     "你是一名专业的AI研究分析师和产品经理。你的目标是：\n"
@@ -162,6 +141,8 @@ def select_generate_research_brief_prompt(sop: str) -> str:
     return GENERATE_RESEARCH_BRIEF_PROMPT_SOP1
 
 # 研究增强查询与参数
+
+# 用于在研究简报生成前，基于主题追加若干通用增强查询（配置驱动，避免业务硬编码）
 ENHANCEMENT_QUERIES = [
     "最佳实践案例和成功经验",
     "常见问题和风险因素",

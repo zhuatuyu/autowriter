@@ -14,7 +14,7 @@ from backend.actions.metric_design_action import DesignMetricSystem
 class MetricEvaluator(Role):
     name: str = "指标评价专家"
     profile: str = "MetricEvaluator"
-    goal: str = "根据指标体系进行统一评价并回写"
+    goal: str = "根据指标体系进行统一评价并给出评价意见和评分"
     constraints: str = "严格输出score/opinion并写回md"
 
     def __init__(self, **kwargs):

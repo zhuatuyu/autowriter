@@ -8,8 +8,8 @@ from metagpt.actions import Action
 from metagpt.logs import logger
 from backend.services.intelligent_search import intelligent_search
 from backend.config.writer_prompts import (
-    WRITER_BASE_SYSTEM as ENV_WRITER_BASE_SYSTEM,
-    SECTION_WRITING_PROMPT as ENV_SECTION_WRITING_PROMPT,
+    WRITER_BASE_SYSTEM,      # 写作专家系统提示（写作目标/质量要求）
+    SECTION_WRITING_PROMPT,  # 章节写作提示词模板（标题/指导/事实/指标拼装）
 )
 from backend.tools.json_utils import extract_json_from_llm_response
 from backend.tools.project_info import get_project_info_text
@@ -126,7 +126,7 @@ class WriteSection(Action):
                     for _, row in relevant_metrics.iterrows()
                 ])
         
-        prompt = ENV_SECTION_WRITING_PROMPT.format(
+        prompt = SECTION_WRITING_PROMPT.format(
             section_title=task.section_title,
             instruction=task.instruction,
             factual_basis=factual_basis,
@@ -140,7 +140,7 @@ class WriteSection(Action):
         # 使用LLM生成内容
         # 注入项目配置信息作为系统级提示
         project_info_text = get_project_info_text()
-        section_content = await self._aask(prompt, [ENV_WRITER_BASE_SYSTEM, project_info_text])
+        section_content = await self._aask(prompt, [WRITER_BASE_SYSTEM, project_info_text])
         return section_content
 
 

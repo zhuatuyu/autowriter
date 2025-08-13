@@ -6,11 +6,11 @@ from metagpt.actions import Action
 from metagpt.logs import logger
 from backend.tools.json_utils import extract_json_from_llm_response
 
-from backend.config.evaluation_standards import EVALUATION_TYPES as ENV_EVALUATION_TYPES
+from backend.config.evaluation_standards import EVALUATION_TYPES  # 评价类型配置（描述/评分指导/意见写法要求）
 from backend.config.evaluator_prompts import (
-    EVALUATOR_BASE_SYSTEM as ENV_EVALUATOR_BASE_SYSTEM,
-    EVALUATION_PROMPT_TEMPLATE as ENV_EVALUATOR_PROMPT_TEMPLATE,
-    METRIC_PROMPT_SPEC as ENV_METRIC_PROMPT_SPEC,
+    EVALUATOR_BASE_SYSTEM,     # 评价专家系统提示
+    EVALUATION_PROMPT_TEMPLATE, # 统一评价提示词模板（仅输出JSON: score/opinion）
+    METRIC_PROMPT_SPEC,        # 指标级提示词组合规范（不同评价类型的要点/计分说明）
 )
 from pathlib import Path
 import re
@@ -171,7 +171,7 @@ class EvaluateMetrics(Action):
         logger.info(f"📚 检索到事实依据: {len(facts)} 字符")
 
         # 从配置获取该评价类型的详细说明
-        eval_cfg = ENV_EVALUATION_TYPES.get(evaluation_type, {})
+        eval_cfg = EVALUATION_TYPES.get(evaluation_type, {})
         type_description = eval_cfg.get("description", "")
         scoring_guidance = eval_cfg.get("scoring_guidance", "")
         opinion_requirements = eval_cfg.get("opinion_requirements", "")
@@ -180,8 +180,8 @@ class EvaluateMetrics(Action):
         logger.info(f"📝 评价意见要求: {len(opinion_requirements)} 字符")
 
         # 指标级提示词组合规范
-        spec_default = ENV_METRIC_PROMPT_SPEC.get('default', {})
-        spec_type = ENV_METRIC_PROMPT_SPEC.get('by_evaluation_type', {}).get(evaluation_type, {})
+        spec_default = METRIC_PROMPT_SPEC.get('default', {})
+        spec_type = METRIC_PROMPT_SPEC.get('by_evaluation_type', {}).get(evaluation_type, {})
         points_intro = spec_type.get('points_intro', spec_default.get('points_intro', '评价要点：'))
         point_bullet = spec_type.get('point_bullet', spec_default.get('point_bullet', '① '))
         scoring_method_intro = spec_type.get('scoring_method_intro', spec_default.get('scoring_method_intro', '评分方法：'))
@@ -206,8 +206,8 @@ class EvaluateMetrics(Action):
             else:
                 scoring_method = f"{scoring_method_intro}无"
 
-        if ENV_EVALUATOR_PROMPT_TEMPLATE:
-            prompt = ENV_EVALUATOR_PROMPT_TEMPLATE.format(
+        if EVALUATION_PROMPT_TEMPLATE:
+            prompt = EVALUATION_PROMPT_TEMPLATE.format(
                 evaluation_type=evaluation_type or "标准评价",
                 evaluation_points=points_str,
                 facts=facts,
@@ -225,7 +225,7 @@ class EvaluateMetrics(Action):
         try:
             project_info_text = get_project_info_text()
             logger.info("🤖 开始调用LLM进行评分...")
-            result = await self._aask(prompt, [ENV_EVALUATOR_BASE_SYSTEM, project_info_text])
+            result = await self._aask(prompt, [EVALUATOR_BASE_SYSTEM, project_info_text])
             logger.info(f"🤖 LLM响应完成: {len(result)} 字符")
             
             # 解析JSON响应

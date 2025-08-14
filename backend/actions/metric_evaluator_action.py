@@ -46,6 +46,11 @@ class EvaluateMetrics(Action):
                     m = re.search(r"```json\s*(.*?)\s*```", text, flags=re.DOTALL)
                     if m:
                         metrics_data = extract_json_from_llm_response(m.group(1))
+                # 记录 docs 目录，供事实依据/简报回写使用
+                try:
+                    self._docs_dir = path.parent
+                except Exception:
+                    self._docs_dir = None
             if metrics_data is None:
                 # 回退：解析传入的 JSON 字符串（兼容代码块/松散JSON）
                 metrics_data = extract_json_from_llm_response(metric_table_json)
@@ -86,6 +91,16 @@ class EvaluateMetrics(Action):
                     logger.info(f"📝 已回写评分与意见至: {metric_table_md_path}")
                 except Exception as e:
                     logger.error(f"回写metric_analysis_table.md失败: {e}")
+
+            # 将评分摘要注入研究简报附录区（不改变六键JSON结构）
+            try:
+                if getattr(self, "_docs_dir", None):
+                    brief_path = self._docs_dir / "research_brief.md"
+                    if brief_path.exists():
+                        self._update_research_brief_with_metrics(str(brief_path), metrics_scores)
+                        logger.info(f"📝 已将评分摘要注入简报: {brief_path}")
+            except Exception as e:
+                logger.error(f"注入研究简报评分摘要失败: {e}")
 
             result = {"metrics_scores": metrics_scores}
             logger.info("📊 指标评分完成，已回写每项 score/opinion")
@@ -166,9 +181,9 @@ class EvaluateMetrics(Action):
 
         logger.info(f"🔍 开始评价指标: {metric_name} (类型: {evaluation_type})")
 
-        # RAG检索事实
+        # 注入研究简报事实（禁用RAG检索）
         facts = await self._retrieve_metric_facts(metric_name, vector_store_path)
-        logger.info(f"📚 检索到事实依据: {len(facts)} 字符")
+        logger.info(f"📚 注入的事实依据: {len(facts)} 字符")
 
         # 从配置获取该评价类型的详细说明
         eval_cfg = EVALUATION_TYPES.get(evaluation_type, {})
@@ -257,28 +272,61 @@ class EvaluateMetrics(Action):
             return 0, f"统一评价过程中出现错误：{str(e)}"
 
     async def _retrieve_metric_facts(self, metric_name: str, vector_store_path: str) -> str:
-        """🧠 使用智能检索服务为指标检索相关事实依据"""
+        """注入研究简报为事实依据，避免在评价阶段再次进行RAG检索。"""
         try:
-            from backend.services.intelligent_search import intelligent_search
-
-            primary_query = f"{metric_name} 的具体数据、完成情况和实施效果"
-
-            search_result = await intelligent_search.intelligent_search(
-                query=primary_query,
-                project_vector_storage_path=vector_store_path,
-                mode="hybrid",
-                enable_global=True,
-                max_results=5,
-            )
-
-            if search_result.get("results"):
-                facts = "\n\n".join(search_result["results"])
-                if search_result.get("insights"):
-                    facts += "\n\n💡 智能分析:\n" + "\n".join(search_result["insights"])
-                return facts
-            return f"未能检索到关于'{metric_name}'的相关事实依据。"
+            # 优先从 docs/research_brief.md 读取六键内容
+            docs_dir = getattr(self, "_docs_dir", None)
+            if docs_dir:
+                brief_path = docs_dir / "research_brief.md"
+                if brief_path.exists():
+                    raw = brief_path.read_text(encoding="utf-8").strip()
+                    brief = extract_json_from_llm_response(raw)
+                    brief = brief if isinstance(brief, dict) else {}
+                    # 选择与指标事实最相关的键拼装为事实
+                    parts = []
+                    for key in ["项目情况", "资金情况", "重要事件", "政策引用", "可借鉴网络案例"]:
+                        val = brief.get(key)
+                        if isinstance(val, str) and val.strip():
+                            parts.append(f"【{key}】\n{val.strip()}")
+                    if parts:
+                        return "\n\n".join(parts)
+            # 简报不可用时，返回提示文本，不再做RAG检索
+            return f"依据研究简报信息进行评价。若事实不足，请在简报中补充与‘{metric_name}’相关的证据。"
         except Exception as e:
-            logger.error(f"智能检索指标事实失败: {e}")
-            return f"检索失败，无法获取关于'{metric_name}'的事实依据。"
+            logger.error(f"读取研究简报失败: {e}")
+            return f"读取研究简报失败，评价将仅基于指标要点执行。"
+
+    def _update_research_brief_with_metrics(self, brief_md_path: str, metrics_scores: list[dict]) -> None:
+        """在不改变六键JSON结构的前提下，将评分摘要以附录形式追加到简报文件尾部。"""
+        path = Path(brief_md_path)
+        if not path.exists():
+            return
+        try:
+            original = path.read_text(encoding="utf-8")
+        except Exception:
+            return
+
+        # 构建简要摘要（控制长度，opinion 压缩为单行）
+        lines = []
+        for item in metrics_scores[:30]:  # 最多摘要前30项，避免过长
+            metric = item.get("metric", {})
+            name = metric.get("name") or metric.get("metric_id") or "未知指标"
+            score = item.get("score", 0)
+            opinion = str(item.get("opinion", "")).replace("\n", " ").replace("\r", " ")
+            if len(opinion) > 180:
+                opinion = opinion[:180] + "…"
+            lines.append(f"- {name}: {score} 分；意见：{opinion}")
+
+        appendix = "\n\n## 指标体系与评分摘要\n" + "\n".join(lines) if lines else "\n\n## 指标体系与评分摘要\n（暂无可用评分摘要）"
+
+        # 若已存在该章节标题，则替换；否则追加
+        if "\n## 指标体系与评分摘要\n" in original:
+            # 简单替换到文末的同名段落
+            head, _sep, _tail = original.partition("\n## 指标体系与评分摘要\n")
+            new_content = head + appendix
+        else:
+            new_content = original.rstrip() + appendix
+
+        path.write_text(new_content, encoding="utf-8")
 
 

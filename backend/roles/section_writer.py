@@ -46,29 +46,14 @@ class SectionWriter(Role):
         arch_output = arch_msgs[-1].instruct_content
         logger.info(f"SectionWriter: 接收到架构师结构信息: {type(arch_output)}")
         
-        # 读取指标表JSON（作为写作上下文引用）
-        updated_metric_data = "{}"
-        try:
-            from pathlib import Path as _Path
-            import re as _re
-            md_path = _Path(self._project_repo.docs.workdir) / "metric_analysis_table.md"
-            if md_path.exists():
-                text = md_path.read_text(encoding="utf-8")
-                m = _re.search(r"```json\s*(.*?)\s*```", text, flags=_re.DOTALL)
-                if m:
-                    updated_metric_data = m.group(1)
-                    logger.info(f"✅ 成功读取指标表JSON，长度: {len(updated_metric_data)} 字符")
-                else:
-                    logger.warning("⚠️ 指标表中未找到JSON代码块")
-            else:
-                logger.warning("⚠️ 指标表文件不存在")
-        except Exception as e:
-            logger.error(f"❌ 读取指标表失败: {e}")
+        # 章节写作不再注入指标表或触发检索：仅消费研究简报与网络案例摘录
 
         # 写作
         sections = []
         write_action = WriteSection()
-        vector_store_path = None  # 保持现状：章节写作侧主要依赖混合检索与指标引用
+        # 注入 ProjectRepo，供写作Action读取 docs/resources（研究简报与网络案例）
+        write_action._project_repo = self._project_repo
+        vector_store_path = None  # 不使用RAG
         tasks = getattr(task_plan, 'tasks', []) if task_plan else []
         
         logger.info(f"SectionWriter: 开始写作 {len(tasks)} 个章节")
@@ -82,7 +67,7 @@ class SectionWriter(Role):
             
             logger.info(f"📝 写作章节 {i+1}: {getattr(task_obj, 'section_title', '未知标题')}")
             
-            sec = await write_action.run(task=task_obj, vector_store_path=vector_store_path, metric_table_json=updated_metric_data)
+            sec = await write_action.run(task=task_obj)
             sections.append(sec)
             logger.info(f"✅ 章节 {i+1} 写作完成")
 

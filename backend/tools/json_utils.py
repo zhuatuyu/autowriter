@@ -24,10 +24,9 @@ def extract_json_from_llm_response(response: str) -> Any:
     3) 匹配并解析首个 JSON 数组 [...]（括号配对）
     4) 匹配并解析首个 JSON 对象 {...}（括号配对）
     """
-    text = response or ""
-
-    # 基础预处理：去除常见不可见字符与成对中文引号尽量替换为英文
-    text = text.replace("\uFEFF", "").replace("“", '"').replace("”", '"')
+    original_text = response or ""
+    # 基础预处理：仅去除 BOM 等不可见字符；不在首轮替换中文引号，避免破坏本就合法的 JSON 串
+    text = original_text.replace("\uFEFF", "")
 
     def _normalize(obj: Any) -> Any:
         """将解析结果归一化为更易消费的结构（尽量返回列表）。"""
@@ -71,45 +70,88 @@ def extract_json_from_llm_response(response: str) -> Any:
         except Exception:
             pass
 
-    # 尝试3：优先匹配 JSON 数组 [...]（括号配对）
-    start_idx = text.find('[')
-    if start_idx != -1:
-        bracket_count = 0
-        end_idx = start_idx
-        for i, ch in enumerate(text[start_idx:], start_idx):
-            if ch == '[':
-                bracket_count += 1
-            elif ch == ']':
-                bracket_count -= 1
-                if bracket_count == 0:
-                    end_idx = i
-                    break
-        if bracket_count == 0:
-            json_str = text[start_idx:end_idx + 1]
-            try:
-                return _normalize(json.loads(json_str))
-            except Exception:
-                pass
+    # 工具函数：引号与转义感知的括号配对提取
+    def _extract_balanced_segment(src: str, open_ch: str, close_ch: str) -> str | None:
+        start = src.find(open_ch)
+        if start == -1:
+            return None
+        in_string = False
+        escape = False
+        depth = 0
+        for i in range(start, len(src)):
+            ch = src[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == '\\':
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            else:
+                if ch == '"':
+                    in_string = True
+                    continue
+                if ch == open_ch:
+                    depth += 1
+                elif ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        return src[start:i + 1]
+        return None
 
-    # 尝试4：匹配 JSON 对象 {...}（括号配对）
-    start_idx = text.find('{')
-    if start_idx != -1:
-        brace_count = 0
-        end_idx = start_idx
-        for i, ch in enumerate(text[start_idx:], start_idx):
-            if ch == '{':
-                brace_count += 1
-            elif ch == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    end_idx = i
-                    break
-        if brace_count == 0:
-            json_str = text[start_idx:end_idx + 1]
+    # 尝试3：优先匹配 JSON 数组 [...]（引号感知的括号配对）
+    try:
+        arr_seg = _extract_balanced_segment(text, '[', ']')
+        if arr_seg is not None:
+            return _normalize(json.loads(arr_seg))
+    except Exception:
+        pass
+
+    # 尝试4：匹配 JSON 对象 {...}（引号感知的括号配对）
+    try:
+        obj_seg = _extract_balanced_segment(text, '{', '}')
+        if obj_seg is not None:
+            return _normalize(json.loads(obj_seg))
+    except Exception:
+        pass
+
+    # 二次尝试：在替换成对中文引号为英文引号后再重试一轮（用于LLM用中文引号包裹键/值的场景）
+    safe_text = original_text.replace("\uFEFF", "").replace("“", '"').replace("”", '"')
+
+    if safe_text != text:
+        text = safe_text
+        # 尝试1：直接解析
+        try:
+            return _normalize(json.loads(text))
+        except Exception:
+            pass
+        # 尝试2：代码块
+        for pattern in (r"```json\s*(.*?)\s*```", r"```\s*(.*?)\s*```"):
             try:
-                return _normalize(json.loads(json_str))
+                match = re.search(pattern, text, re.DOTALL)
+                if match:
+                    candidate = match.group(1).strip()
+                    try:
+                        return _normalize(json.loads(candidate))
+                    except Exception:
+                        text = candidate
             except Exception:
                 pass
+        # 尝试3：数组
+        try:
+            arr_seg = _extract_balanced_segment(text, '[', ']')
+            if arr_seg is not None:
+                return _normalize(json.loads(arr_seg))
+        except Exception:
+            pass
+        # 尝试4：对象
+        try:
+            obj_seg = _extract_balanced_segment(text, '{', '}')
+            if obj_seg is not None:
+                return _normalize(json.loads(obj_seg))
+        except Exception:
+            pass
 
     raise ValueError("无法从LLM回复中提取有效JSON")
 

@@ -13,11 +13,11 @@ ARCHITECT_BASE_SYSTEM = (
 # 指标体系设计提示词（扁平英文字段约束）
 METRICS_DESIGN_PROMPT = (
     "你是绩效评价指标体系的架构师。请为本项目设计一套完整的绩效评价指标体系。\n\n"
-    "要求：\n"
+    "**重要要求**：\n"
     "- 一级指标固定：决策、过程、产出、效益（在 weight 中体现分值权重）\n"
-    "- 每个一级指标下设置5-8个具体指标\n"
+    "- **必须输出20-30个具体指标**，每个一级指标下至少5个，最多8个\n"
     "- 评价类型仅允许：element_count, formula, condition, qual_quant, deduction, likert\n\n"
-    "仅输出 JSON 数组，每个元素字段固定且仅允许以下英文键：\n"
+    "**输出格式**：仅输出 JSON 数组，每个元素字段固定且仅允许以下英文键：\n"
     "[metric_id, level1_name, level2_name, name, weight, evaluation_type, evaluation_points, scoring_method, opinion, score]\n\n"
     "字段约束：\n"
     "- metric_id: 英文蛇形唯一ID，如 decision_policy_compliance\n"
@@ -33,6 +33,11 @@ METRICS_DESIGN_PROMPT = (
     "- scoring_method: 文本（可省略，因为计分规则已在evaluation_points中体现）\n"
     "- opinion: 文本（写作时作为\"评分过程/要点\"参考）\n"
     "- score: 初始为 0\n\n"
+    "**数量要求**：\n"
+    "- 决策类：至少5个指标（如政策合规、目标明确、预算合理、优先级排序、公众参与等）\n"
+    "- 过程类：至少5个指标（如资金管理、招投标、监理、质量控制、档案管理等）\n"
+    "- 产出类：至少5个指标（如工程进度、质量验收、成本控制、安全施工等）\n"
+    "- 效益类：至少5个指标（如社会效益、经济效益、生态效益、满意度、可持续性等）\n\n"
     "注意：evaluation_points 应该包含完整的评价要素和计分规则，确保评价专家能够根据这些信息进行准确的评分。"
 )
 

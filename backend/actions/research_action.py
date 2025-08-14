@@ -543,11 +543,15 @@ class ConductComprehensiveResearch(Action):
             content = await self._web_browse_and_summarize(url, query)
             contents.append(content)
 
-        # 过滤掉不相关的内容
-        relevant_contents = [c for c in contents if "不相关" not in c]
+        # 过滤掉不相关/空白内容
+        relevant_contents = [c for c in contents if (isinstance(c, str) and c.strip() and "不相关" not in c)]
+        if not relevant_contents:
+            # 回退：至少列出来源URL，避免空报告
+            fallback_blocks = [f"#### 来源: {u}\n无法从该页面提取有效内容。" for u in urls]
+            relevant_contents = fallback_blocks
         
-        # summary = f"### 问题: {query}\n\n" + "\n\n".join(relevant_contents)
-        return relevant_contents
+        summary = f"### 问题: {query}\n\n" + "\n\n".join(relevant_contents)
+        return summary
 
     async def _search_and_rank_urls(self, topic: str, query: str, num_results: int) -> List[str]:
         """搜索并排序URL"""
@@ -635,7 +639,17 @@ class ConductComprehensiveResearch(Action):
             
             # 添加LLM调用后的延迟，避免频率限制
             await asyncio.sleep(1)
-            return f"## 参考来源: {url}\n{summary}"
+            # 若LLM返回空白，则使用兜底：输出原文片段或失败提示，避免空块
+            safe_summary = (summary or "").strip()
+            if not safe_summary:
+                snippet = (content or "").strip()
+                if snippet:
+                    # 截断片段，避免过长
+                    snippet = snippet[:800]
+                    safe_summary = f"未能从页面提取结构化要点。以下为原文片段（截断）：\n\n{snippet}"
+                else:
+                    safe_summary = "无法访问或页面无可用内容。"
+            return f"#### 来源: {url}\n{safe_summary}"
         except Exception as e:
             logger.error(f"浏览URL失败 {url}: {e}")
-            return f"## 参考来源: {url}\n\n无法访问或处理此页面。"
+            return f"#### 来源: {url}\n\n无法访问或处理此页面。"

@@ -23,6 +23,7 @@ class SectionWriter(Role):
         self.set_actions([WriteSection])
         self._watch([CreateTaskPlan, ArchitectAction])
         self._project_repo = None
+        self._last_taskplan_hash = None
 
     async def _act(self) -> Message:
         task_plan_msgs = self.rc.memory.get_by_action(CreateTaskPlan)
@@ -32,12 +33,37 @@ class SectionWriter(Role):
             logger.warning("SectionWriter: 等待任务计划...")
             return Message(content="等待任务计划", cause_by=WriteSection)
         
+        # 若未收到架构师消息，也允许直接按固定路径读取结构文件以继续流程
         if not arch_msgs:
-            logger.warning("SectionWriter: 等待架构师结构...")
-            return Message(content="等待架构师结构", cause_by=WriteSection)
+            logger.warning("SectionWriter: 未收到架构师消息，尝试按固定路径读取结构文件继续...")
 
-        # 获取任务计划
-        task_plan = task_plan_msgs[-1].instruct_content
+        # 获取任务计划（幂等控制：若 TaskPlan 未变化则不重复写作）
+        task_plan_msg = task_plan_msgs[-1]
+        task_plan = task_plan_msg.instruct_content
+        try:
+            import json
+            # 将 TaskPlan 转为 dict 再转字符串用于哈希（兼容 pydantic v1/v2）
+            if hasattr(task_plan, "model_dump"):
+                tp_dict = task_plan.model_dump()
+            elif hasattr(task_plan, "dict"):
+                tp_dict = task_plan.dict()
+            else:
+                tp_dict = getattr(task_plan, "__dict__", {})
+            tp_json = json.dumps(tp_dict, ensure_ascii=False, sort_keys=True)
+            new_hash = str(hash(tp_json))
+        except Exception:
+            new_hash = None
+
+        if self._last_taskplan_hash and new_hash and new_hash == self._last_taskplan_hash:
+            logger.info("SectionWriter: TaskPlan 未变化，跳过重复写作。")
+            return Message(content="TaskPlan 未变化，跳过写作", cause_by=WriteSection)
+        self._last_taskplan_hash = new_hash
+
+        # 若任务列表为空则直接返回，避免空报告
+        tasks = getattr(task_plan, 'tasks', []) if task_plan else []
+        if not tasks:
+            logger.warning("SectionWriter: TaskPlan.tasks 为空，跳过写作")
+            return Message(content="任务为空，跳过写作", cause_by=WriteSection)
         if not task_plan:
             logger.error("SectionWriter: 任务计划为空")
             return Message(content="任务计划为空", cause_by=WriteSection)
@@ -54,7 +80,7 @@ class SectionWriter(Role):
         # 注入 ProjectRepo，供写作Action读取 docs/resources（研究简报与网络案例）
         write_action._project_repo = self._project_repo
         vector_store_path = None  # 不使用RAG
-        tasks = getattr(task_plan, 'tasks', []) if task_plan else []
+        # tasks 已在上方判空
         
         logger.info(f"SectionWriter: 开始写作 {len(tasks)} 个章节")
         

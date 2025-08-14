@@ -48,7 +48,8 @@ class CompanySOP2:
 
         user_msg = Message(content=message, cause_by=UserRequirement)
         team.env.publish_message(user_msg)
-        await team.run(n_round=8)
+        # 设置为3轮：1) 架构结构 → 2) PM 任务计划 → 3) Writer 输出最终报告
+        await team.run(n_round=3)
         return "SOP2完成：章节写作与最终报告已生成"
 
     async def _get_or_create_team(self, project_id: str, environment: Environment, workspace_config: Dict[str, Any]) -> Team:
@@ -63,24 +64,22 @@ class CompanySOP2:
 
         # 常量化后无需加载性能配置 YAML
 
-        # 组建团队：TeamLeader + ProductManager + ArchitectContent + PM + SectionWriter
+        # 组建团队：TeamLeader + ArchitectContent + PM + SectionWriter（SOP2 不再引入 ProductManager）
         from backend.roles.custom_team_leader import CustomTeamLeader
-        from backend.roles.product_manager import ProductManager
         from backend.roles.architect_content import ArchitectContent
         from backend.roles.project_manager import ProjectManager as PM
         from backend.roles.section_writer import SectionWriter
         team_leader = CustomTeamLeader()
-        product_manager = ProductManager()
         architect_content = ArchitectContent()
         project_manager = PM()
         section_writer = SectionWriter()
 
         # 注入repo（确保各角色能读写 workspace）
-        for role in [product_manager, architect_content, section_writer]:
+        for role in [architect_content, project_manager, section_writer]:
             role._project_repo = self.project_repo
 
         team = Team(investment=10.0, environment=environment)
-        team.hire([team_leader, product_manager, architect_content, project_manager, section_writer])
+        team.hire([team_leader, architect_content, project_manager, section_writer])
 
         self.team = team
         return team

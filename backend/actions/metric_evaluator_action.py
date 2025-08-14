@@ -92,15 +92,8 @@ class EvaluateMetrics(Action):
                 except Exception as e:
                     logger.error(f"回写metric_analysis_table.md失败: {e}")
 
-            # 将评分摘要注入研究简报附录区（不改变六键JSON结构）
-            try:
-                if getattr(self, "_docs_dir", None):
-                    brief_path = self._docs_dir / "research_brief.md"
-                    if brief_path.exists():
-                        self._update_research_brief_with_metrics(str(brief_path), metrics_scores)
-                        logger.info(f"📝 已将评分摘要注入简报: {brief_path}")
-            except Exception as e:
-                logger.error(f"注入研究简报评分摘要失败: {e}")
+            # 按新要求：不再向 research_brief.md 注入任何附录，保持六键JSON纯净
+            # 保留 metric_analysis_table.md 回写行为，不改动简报文件
 
             result = {"metrics_scores": metrics_scores}
             logger.info("📊 指标评分完成，已回写每项 score/opinion")
@@ -296,37 +289,6 @@ class EvaluateMetrics(Action):
             logger.error(f"读取研究简报失败: {e}")
             return f"读取研究简报失败，评价将仅基于指标要点执行。"
 
-    def _update_research_brief_with_metrics(self, brief_md_path: str, metrics_scores: list[dict]) -> None:
-        """在不改变六键JSON结构的前提下，将评分摘要以附录形式追加到简报文件尾部。"""
-        path = Path(brief_md_path)
-        if not path.exists():
-            return
-        try:
-            original = path.read_text(encoding="utf-8")
-        except Exception:
-            return
-
-        # 构建简要摘要（控制长度，opinion 压缩为单行）
-        lines = []
-        for item in metrics_scores[:30]:  # 最多摘要前30项，避免过长
-            metric = item.get("metric", {})
-            name = metric.get("name") or metric.get("metric_id") or "未知指标"
-            score = item.get("score", 0)
-            opinion = str(item.get("opinion", "")).replace("\n", " ").replace("\r", " ")
-            if len(opinion) > 180:
-                opinion = opinion[:180] + "…"
-            lines.append(f"- {name}: {score} 分；意见：{opinion}")
-
-        appendix = "\n\n## 指标体系与评分摘要\n" + "\n".join(lines) if lines else "\n\n## 指标体系与评分摘要\n（暂无可用评分摘要）"
-
-        # 若已存在该章节标题，则替换；否则追加
-        if "\n## 指标体系与评分摘要\n" in original:
-            # 简单替换到文末的同名段落
-            head, _sep, _tail = original.partition("\n## 指标体系与评分摘要\n")
-            new_content = head + appendix
-        else:
-            new_content = original.rstrip() + appendix
-
-        path.write_text(new_content, encoding="utf-8")
+    
 
 

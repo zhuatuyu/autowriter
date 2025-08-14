@@ -50,8 +50,13 @@ class ProjectManager(Role):
             logger.info(f"📋 接收到架构师消息: {structure_msg.content}")
 
             # 读取 Pydantic instruct_content
-            instruct_content = structure_msg.instruct_content
-            structure_file_path = getattr(instruct_content, "structure_file_path", "") if instruct_content else ""
+            # 为规避上游 instruct_content 序列化问题，这里固定从 workspace/docs 读取结构文件
+            from pathlib import Path
+            try:
+                base = self._project_repo.workdir if hasattr(self, "_project_repo") and self._project_repo else "."
+                structure_file_path = str(Path(base) / "docs" / "report_structure.md")
+            except Exception:
+                structure_file_path = ""
             if not structure_file_path:
                 logger.error("缺少结构文件路径 structure_file_path")
                 return Message(content="缺少结构文件路径", role=self.profile)

@@ -11,6 +11,7 @@ from backend.config.writer_prompts import (
 )
 from backend.tools.project_info import get_project_info_text
 from backend.tools.json_utils import extract_json_from_llm_response
+import json
 from .project_manager_action import Task
 import re
 
@@ -29,6 +30,10 @@ class WriteSection(Action):
         logger.info(f"开始写作章节: {task.section_title}")
         # 1) 读取研究简报与参考网络资料（不做RAG检索）
         factual_basis = await self._assemble_factual_basis(task)
+        # 1.1) 读取指标表做轻量统计（不注入到消息，不污染简报）
+        metric_summary_text = self._summarize_metrics()
+        if metric_summary_text:
+            factual_basis += "\n\n## 指标体系要点（来自 metric_analysis_table.md）\n" + metric_summary_text
         # 2) 构建写作prompt
         prompt = self._build_writing_prompt(task, factual_basis)
         # 3) 生成章节内容
@@ -75,6 +80,44 @@ class WriteSection(Action):
             if v:
                 lines.append(f"### {k}\n{v}")
         return ("\n\n".join(lines), brief)
+
+    def _summarize_metrics(self) -> str:
+        """从 metric_analysis_table.md 读取 JSON，做轻量统计摘要。
+        - 仅统计：总指标数、按一级维度分布（决策/过程/产出/效益）、已评分/未评分数量、平均分。
+        - 返回纯文本，不影响上游消息与简报。
+        """
+        try:
+            project_root = self._get_project_root()
+            metric_file = project_root / "docs" / "metric_analysis_table.md"
+            if not metric_file.exists():
+                return ""
+            text = metric_file.read_text(encoding="utf-8")
+            import re
+            m = re.search(r"```json\s*(.*?)\s*```", text, flags=re.DOTALL)
+            if not m:
+                return ""
+            data = json.loads(m.group(1))
+            if not isinstance(data, list):
+                return ""
+            total = len(data)
+            by_l1 = {}
+            scored = 0
+            score_sum = 0.0
+            for item in data:
+                l1 = item.get("level1_name") or "未分组"
+                by_l1[l1] = by_l1.get(l1, 0) + 1
+                if isinstance(item.get("score"), (int, float)):
+                    scored += 1
+                    score_sum += float(item["score"])
+            avg = (score_sum / scored) if scored else 0.0
+            parts = [f"总指标数: {total}", f"已评分/未评分: {scored}/{total-scored}", f"平均分: {avg:.2f}"]
+            parts.append("按一级维度分布:" )
+            for k, v in by_l1.items():
+                parts.append(f"- {k}: {v}")
+            return "\n".join(parts)
+        except Exception as e:
+            logger.warning(f"读取指标表统计失败: {e}")
+            return ""
 
     def _collect_case_snippets_by_source(self, project_root: Path, brief: dict) -> str:
         """根据简报中的‘来源：...’URL/文件名，在 resources/ 网络案例文件中截取对应片段。"""

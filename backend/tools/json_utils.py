@@ -32,8 +32,8 @@ def extract_json_from_llm_response(response: str) -> Any:
     def _normalize(obj: Any) -> Any:
         """将解析结果归一化为更易消费的结构（尽量返回列表）。"""
         if isinstance(obj, list):
-            # 仅保留字典项，过滤掉异常字符串等
-            return [item for item in obj if isinstance(item, dict)]
+            # 保留原始列表（支持字符串/字典等混合场景，如关键词列表）
+            return obj
 
         if isinstance(obj, dict):
             # 常见列表字段（扩充：包含 performance_metrics）

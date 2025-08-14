@@ -68,7 +68,7 @@ class SectionWriter(Role):
         # 写作
         sections = []
         write_action = WriteSection()
-        vector_store_path = None
+        vector_store_path = None  # 保持现状：章节写作侧主要依赖混合检索与指标引用
         tasks = getattr(task_plan, 'tasks', []) if task_plan else []
         
         logger.info(f"SectionWriter: 开始写作 {len(tasks)} 个章节")

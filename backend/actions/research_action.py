@@ -30,14 +30,12 @@ from backend.config.research_prompts import (
     DECOMPOSE_RESEARCH_PROMPT,           # 研究问题分解提示
     RANK_URLS_PROMPT,                    # URL 排序提示（白名单约束）
     WEB_CONTENT_ANALYSIS_PROMPT,         # 网页内容分析提取提示
-    select_generate_research_brief_prompt,
+    GENERATE_RESEARCH_BRIEF_PROMPT,      # 统一生成简报模板（6键）
     ENHANCEMENT_QUERIES,                 # 研究增强查询模板
     RESEARCH_DECOMPOSITION_NUMS,         # 问题分解数量
     RESEARCH_URLS_PER_QUERY,             # 每问题URL数量
-    FALLBACK_KEYWORDS,                   # 回退关键词
     MAX_INPUT_TOKENS,                    # LLM输入长度限制
-    METRIC_DECOMPOSITION_DIMENSIONS,     # 指标维度分解
-    SECTION_DECOMPOSITION_DIMENSIONS,    # 章节维度分解
+    DECOMPOSITION_DIMENSIONS,            # 统一研究方向维度种子
 )
 
 # MetaGPT 原生 RAG 组件 - 强制使用，不再提供简化版本
@@ -122,35 +120,33 @@ class ConductComprehensiveResearch(Action):
             logger.info(f"✅ 项目知识库构建成功: {vector_store_path}")
             logger.info("✅ 统一检索服务已准备就绪。")
         
-        # 2. 网络研究 (如果有项目知识库，将用于RAG增强)
-        # SOP 推断：用于控制问题分解是否走指标维度
-        sop = "sop1"
-        try:
-            if project_repo and "sop2" in str(project_repo.workdir).lower():
-                sop = "sop2"
-        except Exception:
-            pass
+        # 2. 网络研究（统一研究方向与生成规则，不再按 SOP 分支）
 
         online_research_content = await self._conduct_online_research(
             topic, 
             decomposition_nums, 
             url_per_query,
-            project_vector_path=vector_store_path,  # 传递项目知识库路径用于RAG增强
-            sop=sop
+            project_vector_path=vector_store_path  # 传递项目知识库路径用于RAG增强
         )
 
-        # 3. 将网络研究内容也添加到项目知识库（实现共建共享）
-        if online_research_content and vector_store_path:
-            logger.info("🔄 将网络研究内容添加到项目知识库...")
-            await self._add_online_content_to_project(online_research_content, vector_store_path, topic, project_repo)
-        elif online_research_content and not vector_store_path:
-            # 如果没有本地文档，为网络内容创建项目知识库
-            logger.info("📁 为网络研究内容创建项目知识库...")
+        # 3. 保存网络研究内容到资源目录（不进入本地向量库）并确保存在项目知识库路径
+        if online_research_content and project_repo:
+            try:
+                from datetime import datetime as _dt
+                ts = _dt.now().strftime("%Y%m%d%H%M%S")
+                fname = f"网络案例深度研究报告{ts}.md"
+                await project_repo.resources.save(filename=fname, content=online_research_content)
+                logger.info(f"📄 网络研究内容已保存到资源目录: {project_repo.resources.workdir / fname}")
+            except Exception as e:
+                logger.warning(f"⚠️ 保存网络研究内容到资源目录失败: {e}")
+        if not vector_store_path:
+            # 若尚未创建项目知识库，则创建一个空的以保证后续流程依赖
+            logger.info("📁 创建空项目知识库（不包含网络研究内容）...")
             vector_store_path, _ = await self._build_project_knowledge_base_unified(
-                topic, Documents(), project_repo, online_content=online_research_content
+                topic, Documents(), project_repo, online_content=""
             )
 
-        # 4. 🧠 智能检索增强内容整合
+        # 4. 🧠 智能检索增强内容整合（加入可维护的 research_brief 历史，供后续上下文直接引用）
         combined_content = online_research_content
         if local_docs and local_docs.docs:
             local_docs_content = "\n\n--- 本地知识库 ---\n"
@@ -180,12 +176,13 @@ class ConductComprehensiveResearch(Action):
 
         allowed_project_docs: List[str] = []
         try:
-            if vector_store_path:
-                p = Path(vector_store_path)
-                if p.exists() and p.is_dir():
-                    for fp in p.glob("*.md"):
+            # 来自资源目录的网络案例深度研究报告
+            if project_repo:
+                rp = project_repo.resources.workdir
+                if rp.exists() and rp.is_dir():
+                    for fp in rp.glob("网络案例深度研究报告*.md"):
                         allowed_project_docs.append(fp.name)
-            # 同时纳入本轮本地文档文件名
+            # 本轮本地上传文档文件名
             if local_docs and local_docs.docs:
                 for d in local_docs.docs:
                     allowed_project_docs.append(d.filename)
@@ -193,16 +190,8 @@ class ConductComprehensiveResearch(Action):
         except Exception:
             pass
 
-        # 使用安全占位符替换，避免 JSON 花括号与 str.format 冲突导致 KeyError
-        # 基于SOP选择不同的扁平化研究简报模板（默认sop1）
-        sop = "sop1"
-        try:
-            # 从项目路径推断或未来从env/flag注入
-            if project_repo and "sop2" in str(project_repo.workdir).lower():
-                sop = "sop2"
-        except Exception:
-            pass
-        prompt_template = select_generate_research_brief_prompt(sop)
+        # 使用统一的可维护简报模板（仅6键）
+        prompt_template = GENERATE_RESEARCH_BRIEF_PROMPT
         time_stamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         prompt = (
             prompt_template
@@ -218,7 +207,7 @@ class ConductComprehensiveResearch(Action):
         project_info_text = get_project_info_text()
         brief = await self._aask(safe_prompt, [COMPREHENSIVE_RESEARCH_BASE_SYSTEM, project_info_text])
         
-        logger.info(f"研究简报生成完毕。")
+        logger.info(f"研究简报正在生成,数分钟后请查阅。")
 
         # 5. 确保最终向量库路径存在（必须）
         if not vector_store_path:
@@ -231,8 +220,25 @@ class ConductComprehensiveResearch(Action):
         )
 
         if project_repo:
-            docs_filename = "research_brief.md"  # 使用固定的文件名
-            await project_repo.docs.save(filename=docs_filename, content=brief)
+            # 生成“可维护研究简报”：字段级LLM合并，仅保留6键+元信息
+            docs_filename = "research_brief.md"
+            from pathlib import Path as _Path
+            brief_file = _Path(project_repo.docs.workdir) / docs_filename
+            old_brief = {}
+            try:
+                if brief_file.exists():
+                    old_text = brief_file.read_text(encoding="utf-8").strip()
+                    old_brief = extract_json_from_llm_response(old_text)
+                    if not isinstance(old_brief, dict):
+                        old_brief = {}
+            except Exception:
+                old_brief = {}
+
+            # new_notes 使用增强后的研究内容
+            new_notes = enhanced_content or online_research_content or ""
+            merged = await self._merge_research_brief(old_brief, new_notes)
+            merged_json = json.dumps(merged, ensure_ascii=False, indent=2)
+            await project_repo.docs.save(filename=docs_filename, content=merged_json)
             brief_path = project_repo.docs.workdir / docs_filename
             logger.info(f"研究简报已保存到: {brief_path}")
 
@@ -361,8 +367,33 @@ class ConductComprehensiveResearch(Action):
         except Exception as e:
             logger.warning(f"⚠️ 智能检索增强失败: {e}")
             return combined_content
+
+    async def _llm_merge_text(self, field_name: str, old_text: str, new_notes: str) -> str:
+        from backend.config.research_prompts import MERGE_FIELD_PROMPT, MAX_INPUT_TOKENS
+        prompt = MERGE_FIELD_PROMPT.format(field_name=field_name, old_text=old_text or "（无）", new_notes=new_notes or "（无）")
+        project_info_text = get_project_info_text()
+        merged = await self._aask(prompt[:MAX_INPUT_TOKENS], [project_info_text])
+        return (merged or "").strip()
+
+    async def _llm_merge_events(self, old_events: str, new_notes: str) -> str:
+        from backend.config.research_prompts import MERGE_EVENTS_PROMPT, MAX_INPUT_TOKENS
+        prompt = MERGE_EVENTS_PROMPT.format(old_events=old_events or "（无）", new_notes=new_notes or "（无）")
+        project_info_text = get_project_info_text()
+        merged = await self._aask(prompt[:MAX_INPUT_TOKENS], [project_info_text])
+        return (merged or "").strip()
+
+    async def _merge_research_brief(self, old_brief: dict, new_notes: str) -> dict:
+        fields = ["项目情况", "资金情况", "重要事件", "政策引用", "推荐方法", "可借鉴网络案例"]
+        merged = {}
+        for f in fields:
+            old_val = old_brief.get(f, "") if isinstance(old_brief, dict) else ""
+            if f == "重要事件":
+                merged[f] = await self._llm_merge_events(old_val, new_notes)
+            else:
+                merged[f] = await self._llm_merge_text(f, old_val, new_notes)
+        return merged
     
-    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, project_vector_path: str = "", sop: str = "sop1") -> str:
+    async def _conduct_online_research(self, topic: str, decomposition_nums: int, url_per_query: int, project_vector_path: str = "") -> str:
         """执行在线研究"""
         if not self.search_engine:
             logger.error("❌ 搜索引擎未初始化！无法进行在线研究")
@@ -371,17 +402,14 @@ class ConductComprehensiveResearch(Action):
         logger.info("步骤 1: 生成搜索关键词")
         keywords_prompt = RESEARCH_TOPIC_SYSTEM.format(topic=topic)
         try:
+            project_info_text = get_project_info_text()
             keywords_str = await self._aask(
                 SEARCH_KEYWORDS_PROMPT[:MAX_INPUT_TOKENS],
-                [keywords_prompt[:MAX_INPUT_TOKENS]]
+                [keywords_prompt[:MAX_INPUT_TOKENS], project_info_text]
             )
         except Exception as e:
-            logger.warning(f"⚠️ 关键词生成调用失败，将使用回退关键词: {e}")
-            fallback = FALLBACK_KEYWORDS or []
-            if not fallback:
-                fallback = [topic[:50]]
-            import json as _json
-            keywords_str = _json.dumps(fallback, ensure_ascii=False)
+            # 关键词阶段失败直接中断，避免后续流程质量不可控
+            raise ValueError(f"关键词生成调用失败: {e}")
         
         # 添加LLM调用后的延迟，避免频率限制
         await asyncio.sleep(1)
@@ -396,8 +424,8 @@ class ConductComprehensiveResearch(Action):
             else:
                 raise ValueError('parsed keywords not list/dict')
         except Exception as e:
-            logger.warning(f"⚠️ 关键词解析失败，使用回退关键词: {e}")
-            raw_keywords = FALLBACK_KEYWORDS or [topic[:50]]
+            # 明确暴露解析错误，便于快速定位
+            raise ValueError(f"关键词解析失败: {e}; 原始返回: {keywords_str}")
 
         # 统一将关键词规范为字符串列表（通用工具）
         keywords = normalize_keywords(raw_keywords, topic)
@@ -448,46 +476,39 @@ class ConductComprehensiveResearch(Action):
         # 将RAG结果和网络搜索结果合并
         combined_search_results = search_results_str + rag_results_str
 
-        logger.info("步骤 2: 分解研究问题")
-        # 指标构建（SOP1）场景：按 METRIC_DECOMPOSITION_DIMENSIONS 生成维度化的子问题
-        if (sop or "sop1").lower() == "sop1" and METRIC_DECOMPOSITION_DIMENSIONS:
-            # 将维度转为指导性子问题，数量仍受 decomposition_nums 约束
-            dims = METRIC_DECOMPOSITION_DIMENSIONS[:max(1, decomposition_nums)]
-            dim_queries = [f"围绕‘{d}’提出一个与主题‘{topic}’强相关且可检索的具体问题" for d in dims]
-            # 直接作为 queries（跳过LLM再次分解，显著提升稳定性与速度）
-            queries = dim_queries
-        # 章节写作（SOP2）场景：按 SECTION_DECOMPOSITION_DIMENSIONS 生成与章节侧对齐的子问题
-        elif (sop or "sop1").lower() == "sop2" and SECTION_DECOMPOSITION_DIMENSIONS:
-            dims = SECTION_DECOMPOSITION_DIMENSIONS[:max(1, decomposition_nums)]
+        logger.info("步骤 2: 分解研究问题（统一路径）")
+        # 统一：优先用维度直出（若配置存在），否则用 LLM 分解
+        queries = []
+        # 过滤空白/无效维度，避免生成空问题模板
+        dims_seed = [
+            d for d in (DECOMPOSITION_DIMENSIONS or [])
+            if isinstance(d, str) and d.strip()
+        ]
+        if dims_seed:
+            dims = dims_seed[:max(1, decomposition_nums)]
             queries = [f"围绕‘{d}’提出一个与主题‘{topic}’强相关且可检索的具体问题" for d in dims]
-        else:
+        if not queries:
             decompose_prompt = DECOMPOSE_RESEARCH_PROMPT.format(
                 decomposition_nums=decomposition_nums,
                 url_per_query=url_per_query,
                 search_results=combined_search_results
             )
-            # 注入项目配置信息作为系统级提示
             project_info_text = get_project_info_text()
             queries_str = await self._aask(
                 decompose_prompt[:MAX_INPUT_TOKENS],
                 [keywords_prompt[:MAX_INPUT_TOKENS], project_info_text]
             )
-            
-            # 添加LLM调用后的延迟，避免频率限制
             await asyncio.sleep(1)
-            # 统一使用通用JSON解析，兼容代码块/字典/列表
             try:
                 parsed = extract_json_from_llm_response(queries_str)
                 if isinstance(parsed, list):
                     queries = parsed
                 elif isinstance(parsed, dict):
-                    # 常见键名兜底
                     for key in ("queries", "questions", "items"):
                         if key in parsed and isinstance(parsed[key], list):
                             queries = parsed[key]
                             break
                     else:
-                        # 将字典值中可用的字符串收集
                         queries = [v for v in parsed.values() if isinstance(v, str) and v.strip()]
                 else:
                     raise ValueError("parsed queries not list/dict")
@@ -525,8 +546,8 @@ class ConductComprehensiveResearch(Action):
         # 过滤掉不相关的内容
         relevant_contents = [c for c in contents if "不相关" not in c]
         
-        summary = f"### 问题: {query}\n\n" + "\n\n".join(relevant_contents)
-        return summary
+        # summary = f"### 问题: {query}\n\n" + "\n\n".join(relevant_contents)
+        return relevant_contents
 
     async def _search_and_rank_urls(self, topic: str, query: str, num_results: int) -> List[str]:
         """搜索并排序URL"""
@@ -614,7 +635,7 @@ class ConductComprehensiveResearch(Action):
             
             # 添加LLM调用后的延迟，避免频率限制
             await asyncio.sleep(1)
-            return f"#### 来源: {url}\n{summary}"
+            return f"## 参考来源: {url}\n{summary}"
         except Exception as e:
             logger.error(f"浏览URL失败 {url}: {e}")
-            return f"#### 来源: {url}\n\n无法访问或处理此页面。"
+            return f"## 参考来源: {url}\n\n无法访问或处理此页面。"

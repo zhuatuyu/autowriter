@@ -38,28 +38,11 @@ def get_project_info_text(config_path: str = 'config/project01.yaml') -> str:
 
     add("项目名称", info.get('project_name'))
     add("项目类型", info.get('project_type'))
-    add("预算金额", info.get('budget_amount'))
-    add("实施期", info.get('implementation_period'))
+    add("项目描述:", info.get('project_description'))
     add("省", info.get('province'))
     add("市", info.get('city'))
     add("县/区", info.get('county'))
-    add("绩效关注点", info.get('performance_focus'))
 
-    goals = info.get('main_objectives') or []
-    if goals:
-        lines.append("- 主要目标:")
-        for g in goals:
-            lines.append(f"  - {g}")
-
-    acts = info.get('main_activities') or []
-    if acts:
-        lines.append("- 主要活动:")
-        for a in acts:
-            lines.append(f"  - {a}")
-
-    desc = info.get('project_description')
-    if desc:
-        lines.append(f"- 项目描述: {desc}")
 
     return "\n".join(lines)
 

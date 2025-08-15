@@ -38,4 +38,8 @@ workspace:
 # 用户消息配置（用于模拟chainlit输入）
 user_message_sop1: "请基于本项目资料，设计完整可评分的绩效指标体系，并完成各个指标的评价意见与评分。"
 user_message_sop2: "请基于已完成的指标体系表、撰写报告章节内容，撰写本项目的绩效评价报告。"
-user_message_sop3: "在绩效报告编写前期,需要一份深度的调查研究报告,为后续指标评价和章节编写提供参考。"
+user_message_product_manager: "在绩效报告编写前期,需要一份深度的调查研究报告,为后续指标评价和章节编写提供参考。"
+
+# 独立入口智能体用户消息配置
+user_message_architect_content: "请基于研究简报设计报告章节结构，生成包含写作指导和事实引用要求的完整结构。"
+user_message_section_writer: "请基于已生成的报告结构，撰写各章节内容并聚合为最终报告。"

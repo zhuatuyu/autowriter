@@ -1,22 +1,32 @@
 #!/usr/bin/env python
 """
-app_agent_productmanager.py - 仅运行 ProductManager（可维护研究简报）
+独立入口：章节架构师（ArchitectContent）
+独立运行产出 report_structure.json
 
-用法：python app_agent_productmanager.py -y config/project01.yaml
+使用方法：
+python app_agent_architectcontent.py -y config/project01.yaml
+
+功能：
+- 基于研究简报设计章节结构
+- 生成 JSON 格式的 report_structure.json
+- 包含完整的章节配置、写作指导、事实引用要求等
+- 跳过指标表生成（由 SOP1 负责）
+
+输出文件：
+- workspace/project01/docs/report_structure.json
 """
 import asyncio
 import argparse
 import yaml
 from pathlib import Path
 
-from metagpt.logs import logger
-
-from backend.roles.product_manager import ProductManager
 from metagpt.team import Team
-from metagpt.utils.project_repo import ProjectRepo
 from metagpt.roles import TeamLeader
 from metagpt.actions import UserRequirement
 from metagpt.schema import Message
+from metagpt.utils.project_repo import ProjectRepo
+
+from backend.roles.architect_content import ArchitectContent
 
 
 class ProjectConfigLoader:
@@ -30,8 +40,8 @@ class ProjectConfigLoader:
 
     def get_user_message(self):
         return (
-            self.project_config.get('user_message_sop3')
-            or self.project_config.get('user_messages', {}).get('sop3')
+            self.project_config.get('user_message_architect_content')
+            or self.project_config.get('user_messages', {}).get('architect_content')
             or self.project_config.get('user_message', '')
         )
 
@@ -45,32 +55,29 @@ class ProjectConfigLoader:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='ProductManager Only - 仅维护研究简报')
+    parser = argparse.ArgumentParser(description='ArchitectContent Only - 仅生成章节结构')
     parser.add_argument('-y', '--yaml', required=True, help='项目配置文件路径')
     args = parser.parse_args()
 
     loader = ProjectConfigLoader(args.yaml)
     project_id = loader.setup_workspace()
 
-    user_message = loader.get_user_message()
-    # 组建团队（使用 MGXEnv，包含 TeamLeader + ProductManager）
-    team = Team(investment=5.0)
-    product_manager = ProductManager()
-
-    # 注入 repo
     ws = loader.get_workspace_config()
     workspace_path = Path(ws.get('base_path', f"workspace/{project_id}"))
     project_repo = ProjectRepo(workspace_path).with_src_path(workspace_path)
-    product_manager._project_repo = project_repo
 
-    team.hire([TeamLeader(), product_manager])
+    team = Team(investment=5.0)
+    tl = TeamLeader()
+    ac = ArchitectContent()
+    ac._project_repo = project_repo
+    team.hire([tl, ac])
 
-    # 发布用户需求消息（带 Action 标记，触发 ProductManager）
+    user_message = loader.get_user_message() or "请设计报告章节结构"
     team.env.publish_message(Message(content=user_message, cause_by=UserRequirement))
-    # 运行
-    await team.run(n_round=4)
 
-    print("已更新研究简报: research_brief.md")
+    # 2轮足够：1) 读取简报并生成结构 2) 写盘并结束
+    await team.run(n_round=2)
+    print("已生成章节结构: ", project_repo.docs.workdir / "report_structure.json")
 
 
 if __name__ == "__main__":

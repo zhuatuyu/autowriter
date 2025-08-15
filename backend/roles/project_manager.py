@@ -93,11 +93,26 @@ class ProjectManager(Role):
 
             # 执行任务计划创建
             task_plan = await todo.run(rs)
+            # 将任务计划写盘，跨角色仅传路径（避免 instruct_content 序列化问题）
+            try:
+                import json as _json
+                if hasattr(self, "_project_repo") and self._project_repo:
+                    await self._project_repo.docs.save(
+                        filename="task_plan.json",
+                        content=_json.dumps(
+                            task_plan.model_dump() if hasattr(task_plan, "model_dump") else task_plan.dict(),
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                    )
+                    logger.info("📄 任务计划已写入 docs/task_plan.json")
+            except Exception as e:
+                logger.warning(f"保存 task_plan.json 失败: {e}")
+
             msg = Message(
-                content=f"任务计划创建完成，共{len(task_plan.tasks)}个任务",
+                content=f"任务计划创建完成，共{len(task_plan.tasks)}个任务，已保存到 docs/task_plan.json",
                 role=self.profile,
-                cause_by=type(todo),
-                instruct_content=task_plan
+                cause_by=type(todo)
             )
             logger.info(f"ProjectManager完成任务规划，任务数量: {len(task_plan.tasks)}")
             return msg

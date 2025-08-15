@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """
-app_sop4.py - 启动SOP4：仅运行 SectionWriter 进行章节写作（已具备 report_structure.md 与 research_brief.md）
+app_agent_sectionwriter.py - 仅运行 SectionWriter 进行章节写作（已具备 report_structure.json 与 research_brief.md）
 
-用法：python app_sop4.py -y config/project01.yaml
+用法：python app_agent_sectionwriter.py -y config/project01.yaml
 前置：
-- workspace/<project>/docs/report_structure.md 已生成
+- workspace/<project>/docs/report_structure.json 已生成
 - workspace/<project>/docs/research_brief.md 已生成
 - workspace/<project>/docs/metric_analysis_table.md 建议存在（可空）
 """
@@ -21,8 +21,6 @@ from metagpt.schema import Message
 from backend.roles.section_writer import SectionWriter
 from metagpt.utils.project_repo import ProjectRepo
 from backend.actions.architect_content_action import DesignReportStructureOnly as ArchitectAction
-from backend.actions.project_manager_action import CreateTaskPlan, TaskPlan, Task
-import re
 
 
 class ProjectConfigLoader:
@@ -34,6 +32,13 @@ class ProjectConfigLoader:
     def get_workspace_config(self):
         return self.project_config.get('workspace', {})
 
+    def get_user_message(self):
+        return (
+            self.project_config.get('user_message_section_writer')
+            or self.project_config.get('user_messages', {}).get('section_writer')
+            or self.project_config.get('user_message', '')
+        )
+
     def setup_workspace(self) -> str:
         ws = self.get_workspace_config()
         project_id = ws.get('project_id', 'project01')
@@ -44,7 +49,7 @@ class ProjectConfigLoader:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description='AutoWriter SOP4 - SectionWriter Only')
+    parser = argparse.ArgumentParser(description='AutoWriter SectionWriter Only - 仅进行章节写作')
     parser.add_argument('-y', '--yaml', required=True, help='项目配置文件路径')
     args = parser.parse_args()
 
@@ -66,47 +71,20 @@ async def main():
 
     team.hire([tl, writer])
 
-    # 基于磁盘的 report_structure.md 解析生成 TaskPlan，并注入两条消息
-    rs_path = project_repo.docs.workdir / "report_structure.md"
+    # 检查 report_structure.json 是否存在
+    rs_path = project_repo.docs.workdir / "report_structure.json"
     if not rs_path.exists():
         print(f"未找到报告结构文件: {rs_path}")
+        print("请先运行 app_agent_architectcontent.py 生成章节结构")
         return
 
-    sections = []
-    text = rs_path.read_text(encoding="utf-8")
-    # 粗略解析：以 "### " 开头的标题作为章节，后续非标题段落并入 instruction
-    lines = text.splitlines()
-    current_title = None
-    current_instr = []
-    def flush():
-        nonlocal sections, current_title, current_instr
-        if current_title:
-            instruction = "\n".join(current_instr).strip()
-            sections.append({"section_title": current_title, "instruction": instruction or "根据结构与简报撰写"})
-        current_title = None
-        current_instr = []
-
-    for line in lines:
-        if line.startswith("### "):
-            flush()
-            ttl = re.sub(r"^###\s+", "", line).strip()
-            current_title = ttl
-        else:
-            if current_title is not None:
-                current_instr.append(line)
-    flush()
-
-    tasks = [Task(task_id=i, section_title=s["section_title"], instruction=s["instruction"]) for i, s in enumerate(sections)]
-    task_plan = TaskPlan(tasks=tasks)
-
-    # 注入 ArchitectAction（占位满足 SectionWriter 的 _watch），不带 instruct_content 以规避序列化问题
-    team.env.publish_message(Message(content="报告结构已存在（SOP4注入）", cause_by=ArchitectAction))
-    # 注入 CreateTaskPlan（提供实际任务），直接传递 Pydantic BaseModel 实例以满足序列化
-    team.env.publish_message(Message(content="任务计划已注入（SOP4）", cause_by=CreateTaskPlan, instruct_content=task_plan))
+    # 发布用户需求消息，触发 SectionWriter 开始写作
+    user_message = loader.get_user_message() or "请基于已生成的报告结构，撰写各章节内容并聚合为最终报告。"
+    team.env.publish_message(Message(content=user_message, cause_by=ArchitectAction))
 
     await team.run(n_round=4)
 
-    print("SOP4完成：章节写作流程已运行。请在 docs/ 下查看 final_report_*.md（若有生成）。")
+    print("章节写作完成（若Writer已输出）。请在 docs/ 下查看 final_report_*.md。")
 
 
 if __name__ == "__main__":

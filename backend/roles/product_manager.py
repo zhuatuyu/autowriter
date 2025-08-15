@@ -96,12 +96,15 @@ class ProductManager(Role):
             local_docs=documents
         )
         
-        # 创建最终的研究简报消息
+        # 创建最终的研究简报消息（仅传可 JSON 序列化的数据）
+        rd_json = research_data.model_dump() if hasattr(research_data, 'model_dump') else (
+            research_data.dict() if hasattr(research_data, 'dict') else {}
+        )
         msg = Message(
             content=f"研究完成: {research_data.brief[:200]}...",
             role=self.profile,
             cause_by=type(research_action),
-            instruct_content=research_data
+            instruct_content=rd_json
         )
         
         logger.info(f"✅ ProductManager完成所有研究工作。")

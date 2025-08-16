@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 📄 文档结构化信息提取工具 - 基于LangExtract + Google API
-专门用于从绩效评价报告中提取指标体系信息，按照特定JSON结构输出
+专门用于从任何文档中提取结构化信息，按照research_brief.md的格式输出
 
 用法: 
-  python extradoc_useapi.py -f ZYCASE2024省级职业技能竞赛经费项目绩效评价报告.md
-  python extradoc_useapi.py -f 文档1.md 文档2.pdf --output 提取结果.json
-  python extradoc_useapi.py -f 文档.md --visualize  # 生成可视化HTML
+  python extradoc_research.py -f 文档.md
+  python extradoc_research.py -f 文档1.md 文档2.pdf --output 提取结果.json
+  python extradoc_research.py -f 文档.md --visualize  # 生成可视化HTML
 """
 
 import asyncio
@@ -41,71 +41,44 @@ def setup_google_api_environment():
     print(f"   GEMINI_API_KEY: {os.environ['GEMINI_API_KEY'][:8]}...")
     print("💡 使用Google Gemini模型进行文档信息提取")
 
-
-def get_performance_metrics_prompt():
-    """获取绩效指标提取的专门提示词"""
+def get_research_brief_prompt():
+    """获取研究简报提取的专门提示词"""
     return """
-    请从绩效评价报告中提取绩效指标信息，严格按照以下层级结构：
-
-    **层级结构说明**：
-    - 一级指标：决策、过程、产出、效益（4个固定分类）
-    - 二级指标：每个一级指标下的主要评价维度（名称不固定）
-    - 三级指标：具体的评价指标（名称不固定，但这是我们要提取的目标）
-
-    **提取要求**：
-    1. 只提取三级指标，不要提取一级和二级分类标题
-    2. 每个三级指标必须包含完整的评价信息
-    3. 根据文档内容自动识别二级指标名称
-    4. 权重、得分、得分率等信息必须准确
-
-    **输出格式**：严格按照指定的JSON结构输出，包含所有必需字段
+    从文档中提取一个完整的摘要，包含以下字段：
+    - 项目情况: 项目基本信息（名称、地点、内容、资金来源、参建单位等）
+    - 资金情况: 资金详细信息（预算、决算、支付、审计等）
+    - 重要事件: 关键时间节点和重要事件
+    - 政策引用: 相关法律法规、政策文件、标准规范等
+    - 推荐方法: 可推荐的方法、标准、工具、模型、流程等
+    - 可借鉴网络案例: 相关网络案例或参考资料
+    
+    每个文档只提取一个完整摘要。尽可能使用原文内容,所有量化信息均应该保留。
     """
 
-def get_performance_metrics_examples():
-    """获取绩效指标提取的示例"""
+def get_research_brief_examples():
+    """获取研究简报提取的示例"""
     return [
         lx.data.ExampleData(
-            text='A101立项依据充分性：根据人力资源和社会保障部关于印发《"技能中国行动"实施方案的通知》（人社部发〔2021〕48号），人力资源和社会保障部、教育部、发展改革委、财政部关于印发《"十四五"职业技能培训规划的通知》（人社部发〔2021〕102号），中共中央办公厅、国务院办公厅印发《关于加强新时代高技能人才队伍建设的意见》（中办发〔2022〕58号），中共河南省委办公厅、河南省人民政府办公厅关于印发《高质量推进"人人持证、技能河南"建设工作方案》（豫办〔2021〕29号），河南省全民技能振兴工程领导小组关于印发《河南省职业技能大赛组织工作方案》的通知（豫技领〔2021〕2号），河南省人民政府办公厅关于印发《河南省职业技能竞赛管理办法的通知》（豫政办〔2024〕42号），项目立项符合国家和省技能人才工作法律法规和相关政策；项目立项与省人社厅部门职责范围相符，属于部门履职所需；项目属于公共财政支持范围，符合中央、地方事权支出责任划分原则；该指标得2分。',
+            text="项目名称：李口镇道路建设项目。项目地点：河南省商丘市睢阳区李口镇。建设内容：新建混凝土道路5000平方米。资金来源：财政奖补资金。中标单位：河南建设公司。开工日期：2024年1月。竣工日期：2024年3月。",
             extractions=[
                 lx.data.Extraction(
-                    extraction_class="metric",
-                    extraction_text="A101立项依据充分性",
+                    extraction_class="document_summary",
+                    extraction_text="李口镇道路建设项目摘要",
                     attributes={
-                        "metric_id": "A101",
-                        "level1_name": "决策",
-                        "level2_name": "项目立项",
-                        "name": "立项依据充分性",
-                        "weight": "2.00",
-                        "evaluation_type": "condition",
-                        "evaluation_points": "项目立项符合国家和省技能人才工作法律法规和相关政策；项目立项与省人社厅部门职责范围相符，属于部门履职所需；项目属于公共财政支持范围，符合中央、地方事权支出责任划分原则",
-                        "opinion": "项目立项依据充分，符合政策要求",
-                    }
-                )
-            ]
-        ),
-        lx.data.ExampleData(
-            text="C101一次性竞赛补贴项目指标完成数量：2021年计划安排补贴26个赛事146个赛项，实际补贴131个赛项，偏差率为10.27%；2022年计划安排补贴29个赛事101个赛项，实际补贴65个赛项，偏差率为35.64%；2023年计划安排补贴24个赛事168个赛项，实际补贴完成161个赛项，偏差率为4.17%；2024年计划安排补贴31个赛事174个赛项，实际补贴168个赛项，偏差率为3.45%；该指标得6.94分。",
-            extractions=[
-                lx.data.Extraction(
-                    extraction_class="metric",
-                    extraction_text="C101一次性竞赛补贴项目指标完成数量",
-                    attributes={
-                        "metric_id": "C101",
-                        "level1_name": "产出",
-                        "level2_name": "产出数量",
-                        "name": "一次性竞赛补贴项目指标完成数量",
-                        "weight": "8.00",
-                        "evaluation_type": "formula",
-                        "evaluation_points": "2021年偏差率10.27%，2022年偏差率35.64%，2023年偏差率4.17%，2024年偏差率3.45%",
-                        "opinion": "各年度完成情况良好，偏差率控制在合理范围内",
+                        "项目情况": "项目名称：李口镇道路建设项目。项目地点：河南省商丘市睢阳区李口镇。建设内容：新建混凝土道路5000平方米。资金来源：财政奖补资金。中标单位：河南建设公司。开工日期：2024年1月。竣工日期：2024年3月。",
+                        "资金情况": "合同金额：100万元。资金来源：财政奖补资金。",
+                        "重要事件": "2024年1月：项目开工。2024年3月：项目竣工。",
+                        "政策引用": "财政奖补资金政策",
+                        "推荐方法": "采用招投标方式确定施工单位，按合同约定执行项目。",
+                        "可借鉴网络案例": "无相关信息"
                     }
                 )
             ]
         )
     ]
 
-async def extract_performance_metrics_from_document(document_path: str, output_file: Path, visualize: bool = False) -> Dict[str, Any]:
-    """从单个文档中提取绩效指标"""
+async def extract_research_brief_from_document(document_path: str, output_file: Path, visualize: bool = False) -> Dict[str, Any]:
+    """从单个文档中提取研究简报信息"""
     print(f"📖 正在处理文档: {Path(document_path).name}")
     
     try:
@@ -115,24 +88,51 @@ async def extract_performance_metrics_from_document(document_path: str, output_f
         
         print(f"📄 文档长度: {len(document_text):,} 字符")
         
-        # 使用专门的绩效指标提取提示词和示例
-        prompt = get_performance_metrics_prompt()
-        examples = get_performance_metrics_examples()
+        # 使用专门的研究简报提取提示词和示例
+        prompt = get_research_brief_prompt()
+        examples = get_research_brief_examples()
         
-        print("🔍 开始提取绩效指标...")
+        print("🔍 开始提取研究简报信息...")
         
         # 调用LangExtract进行提取
-        result = lx.extract(
-            text_or_documents=document_text,
-            prompt_description=prompt,
-            examples=examples,
-            model_id="gemini-2.0-flash-exp",
-            extraction_passes=2,  # 使用多次提取提高准确性
-            max_workers=10,       # 并行处理
-            max_char_buffer=2000  # 优化上下文长度
-        )
+        try:
+            result = lx.extract(
+                text_or_documents=document_text,
+                prompt_description=prompt,
+                examples=examples,
+                model_id="gemini-1.5-flash",  # 使用兼容的模型
+                extraction_passes=1,  # 减少提取次数避免配额限制
+                max_workers=3,        # 减少并行处理
+                max_char_buffer=2000  # 优化上下文长度
+            )
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                print("⚠️ API配额超限，等待30秒后重试...")
+                await asyncio.sleep(30)
+                result = lx.extract(
+                    text_or_documents=document_text,
+                    prompt_description=prompt,
+                    examples=examples,
+                    model_id="gemini-1.5-flash",
+                    extraction_passes=1,
+                    max_workers=2,        # 进一步减少并行处理
+                    max_char_buffer=2000
+                )
+            elif "400" in str(e) and "JSON mode" in str(e):
+                print("⚠️ 模型不支持JSON模式，尝试使用gemini-1.5-pro...")
+                result = lx.extract(
+                    text_or_documents=document_text,
+                    prompt_description=prompt,
+                    examples=examples,
+                    model_id="gemini-1.5-pro",
+                    extraction_passes=1,
+                    max_workers=2,
+                    max_char_buffer=2000
+                )
+            else:
+                raise e
         
-        print(f"✅ 提取完成！共提取 {len(result.extractions)} 个指标")
+        print(f"✅ 提取完成！共提取 {len(result.extractions)} 个信息块")
         
         # 保存提取结果
         lx.io.save_annotated_documents([result], output_name=output_file.name, output_dir=output_file.parent)
@@ -184,9 +184,9 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""
 示例用法:
-  python extradoc_useapi.py -f 文档.md
-  python extradoc_useapi.py -f 文档1.md 文档2.pdf --output 结果.json
-  python extradoc_useapi.py -f 文档.md --visualize
+  python extradoc_research.py -f 文档.md
+  python extradoc_research.py -f 文档1.md 文档2.pdf --output 结果.json
+  python extradoc_research.py -f 文档.md --visualize
         """)
     )
     
@@ -234,7 +234,7 @@ async def main():
             else:
                 output_name = f"{args.output}_{i+1}"
         else:
-            output_name = Path(document_path).stem + ".extracted_metrics"
+            output_name = Path(document_path).stem + ".research_brief"
         
         output_file = Path("global-docs") / f"{output_name}.json"
         output_file.parent.mkdir(exist_ok=True)
@@ -243,7 +243,7 @@ async def main():
         print(f"📄 处理文档 {i+1}/{len(args.files)}: {Path(document_path).name}")
         print(f"{'='*60}")
         
-        result = await extract_performance_metrics_from_document(
+        result = await extract_research_brief_from_document(
             document_path, 
             output_file, 
             args.visualize
@@ -268,7 +268,7 @@ async def main():
     for i, item in enumerate(results):
         doc_name = Path(item["document"]).name
         if item["result"]["success"]:
-            print(f"✅ 文档 {i+1}: 成功提取 {item['result']['extractions_count']} 个指标")
+            print(f"✅ 文档 {i+1}: 成功提取 {item['result']['extractions_count']} 个信息块")
             print(f"   输出文件: {item['result']['output_file']}")
             if item['result']['visualization_file']:
                 print(f"   可视化文件: {item['result']['visualization_file']}")
@@ -279,10 +279,10 @@ async def main():
     
     if total_success > 0:
         print("\n💡 提示:")
-        print("   - 提取的指标已保存为JSON格式")
+        print("   - 提取的研究简报信息已保存为JSON格式")
         if args.visualize:
             print("   - 可视化HTML文件已生成，可在浏览器中查看")
-        print("   - 可以使用提取的指标数据构建知识图谱或进行进一步分析")
+        print("   - 可以使用提取的结构化信息进行进一步分析或生成报告")
 
 if __name__ == "__main__":
     asyncio.run(main())
